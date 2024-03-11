@@ -1,5 +1,6 @@
 import gurobipy as gp
 from gurobipy import GRB
+import pymetis as metis
 
 from settings.local_settings import DATA_PATH
 
@@ -51,7 +52,23 @@ class DistrictPartitioner:
         for i, j in self.distances:
             self.distances[i, j] = matrix[i][j]
 
-    def _create_model(self):
+    def __init__(self, state: str):
+        self.state = state
+        self._read_data()
+
+    def optimize(self):
+        raise NotImplementedError
+
+    def print_solution(self):
+        raise NotImplementedError
+
+
+# ---------------------------------------------------#
+
+
+class OptimalPartitioner(DistrictPartitioner):
+    def _create_model(self, alpha: float):
+        self.alpha = alpha
         self.model = gp.Model("model")
 
         self.x = {}
@@ -73,7 +90,7 @@ class DistrictPartitioner:
             self.slack[j] = self.model.addVar(vtype=gp.GRB.CONTINUOUS, name="slack")
 
         self.model.setObjective(
-            gp.quicksum(
+            -gp.quicksum(
                 self.y[i, k, j] * self.distances[i, k]
                 for i, k in self.distances
                 for j in range(self.num_districts)
@@ -87,6 +104,7 @@ class DistrictPartitioner:
         for i, k in self.distances:
             for j in range(self.num_districts):
                 self.model.addConstr(self.x[i, j] + self.x[k, j] >= 2 * self.y[i, k, j])
+                self.model.addConstr(self.x[i, j] + self.x[k, j] <= 1 + self.y[i, k, j])
 
         # Add population constraint with slack variable
         for j in range(self.num_districts):
@@ -110,30 +128,32 @@ class DistrictPartitioner:
             )
 
     def __init__(self, state: str, alpha: float):
-        self.state = state
-        self.alpha = alpha
-
-        self._read_data()
-        self._create_model()
+        super().__init__(state)
+        self._create_model(alpha)
 
     def optimize(self):
-        self.model.optimize()
+        return self.model.optimize()
 
     def print_solution(self):
         if self.model.status == GRB.OPTIMAL:
             print("\nObjective Value: %g" % self.model.ObjVal)
             for i in range(self.num_counties):
                 for j in range(self.num_districts):
-                    print("x_{}_{} = {}".format(i, j, self.x[i, j].X))
+                    if self.x[i, j].X > 0:
+                        print("x_{}_{} = {}".format(i, j, self.x[i, j].X))
             for i, k in self.distances:
                 for j in range(self.num_districts):
-                    print(f"y_{i}_{k}_{j} = {self.y[i, k, j].X}")
+                    if self.y[i, k, j].X > 0:
+                        print(f"y_{i}_{k}_{j} = {self.y[i, k, j].X}")
             for j in range(self.num_districts):
                 print("slack_{} = {}".format(j, self.slack[j].X))
         else:
             print("No solution")
 
 
-dp_ri = DistrictPartitioner("AL", 1.0)
-dp_ri.optimize()
-dp_ri.print_solution()
+# ---------------------------------------------------#
+
+
+class MetisPartitioner(DistrictPartitioner):
+    def __init__(self, state: str):
+        super().__init__(state)
