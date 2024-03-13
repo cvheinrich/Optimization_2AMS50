@@ -1,11 +1,28 @@
-import sys
+import argparse
 from partitioning.partitioner import OptimalPartitioner
 
 if __name__ == "__main__":
-    state = "RI"
-    if len(sys.argv) > 1:
-        state = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Districting")
+    parser.add_argument("-s", "--state", default="RI", help="State to district")
+    parser.add_argument(
+        "-a",
+        "--alpha",
+        type=float,
+        default=1.0,
+        help="Alpha value for optimal partitioner",
+    )
+    parser.add_argument(
+        "-m", "--map", type=bool, default=False, help="Show map of districts"
+    )
+    parser.add_argument(
+        "-v", "--verbose", type=bool, default=False, help="Print solution"
+    )
 
-    dp = OptimalPartitioner(state, 1.0)
+    args = parser.parse_args()
+
+    dp = OptimalPartitioner(args.state, args.alpha)
     dp.optimize()
-    dp.print_solution()
+    if args.verbose:
+        dp.print_solution()
+    if args.map:
+        dp.show_map()

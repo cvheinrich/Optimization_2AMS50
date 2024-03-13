@@ -1,18 +1,23 @@
+import os
+
 import gurobipy as gp
 from gurobipy import GRB
 import pymetis as metis
+import geopandas as gpd
+import networkx as nx
+import matplotlib.pyplot as plt
 
 from settings.local_settings import DATA_PATH
 
 
 class DistrictPartitioner:
     def _read_data(self):
-        path = f"{DATA_PATH}/{self.state}/counties/graph"
-        population_file = f"{path}/{self.state}.population"
-        distances_file = f"{path}/{self.state}_distances.csv"
-        neighbors_file = f"{path}/{self.state}.dimacs"
+        path = os.path.join(DATA_PATH, self.state, "counties", "graph")
+        population_file = os.path.join(path, f"{self.state}.population")
+        distances_file = os.path.join(path, f"{self.state}_distances.csv")
+        neighbors_file = os.path.join(path, f"{self.state}.dimacs")
 
-        with open(f"{DATA_PATH}/Numberofdistricts.txt", "r") as file:
+        with open(os.path.join(DATA_PATH, "Numberofdistricts.txt"), "r") as file:
             for line in file:
                 parts = line.strip().split("\t")
                 if parts[0] == self.state:
@@ -61,6 +66,38 @@ class DistrictPartitioner:
 
     def print_solution(self):
         raise NotImplementedError
+
+    def show_map(self):
+        shape_file = os.path.join(
+            DATA_PATH, self.state, "counties", "maps", f"{self.state}_counties.shp"
+        )
+        counties_gdf = gpd.read_file(shape_file)
+
+        counties_gdf["county_id"] = range(len(counties_gdf))
+        counties_gdf["district"] = -1
+
+        district_counties = [
+            {i for i in range(self.num_counties) if self.x[i, j].X > 0.5}
+            for j in range(self.num_districts)
+        ]
+
+        for district, counties in enumerate(district_counties):
+            for county in counties:
+                counties_gdf.loc[counties_gdf["county_id"] == county, "district"] = (
+                    district
+                )
+
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        counties_gdf.plot(
+            column="district",
+            ax=ax,
+            legend=True,
+            categorical=True,
+            legend_kwds={"title": "District"},
+        )
+        plt.show()
 
 
 # ---------------------------------------------------#
