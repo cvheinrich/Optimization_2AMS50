@@ -1,4 +1,6 @@
 import os
+import random
+from typing import List, Tuple
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -6,6 +8,7 @@ import pymetis as metis
 import geopandas as gpd
 import networkx as nx
 import matplotlib.pyplot as plt
+import numpy as np
 
 from settings.local_settings import DATA_PATH
 
@@ -247,6 +250,78 @@ class OptimalPartitioner(DistrictPartitioner):
             {i for i in range(self.num_counties) if self.x[i, j].X > 0.5}
             for j in range(self.num_districts)
         ]
+
+
+# ---------------------------------------------------#
+
+
+class IterativePartitioner(DistrictPartitioner):
+    def __init__(self, state: str, alpha=1.0, iterations=1):
+        self.alpha = alpha
+        self.iterations = iterations
+        super().__init__(state)
+
+    def _find_district(
+        self, source: int, in_district: List[bool]
+    ) -> Tuple[List[int], int]:
+        model = gp.Model("model")
+
+        nodes = np.arange(self.num_counties)[~in_district]
+        x = np.repeat(model.addVar(vtype=GRB.BINARY), nodes.shape[0])
+        y = np.array(
+            [
+                model.addVar(vtype=GRB.BINARY)
+                for i, k in self.distances
+                if not in_district[i] and not in_district[k]
+            ]
+        )
+        flow = np.array(
+            [
+                model.addVar(vtype=GRB.INTEGER)
+                for i, k in self.distances
+                if i < k and not in_district[i] and not in_district[k]
+            ]
+        )
+        self.slack = np.repeat(model.addVar(vtype=GRB.CONTINUOUS), self.num_districts)
+
+        self.model.setObjective(
+            np.sum(
+                [
+                    self.y[i, k, j] * self.distances[i, k]
+                    for i, k in self.distances
+                    for j in range(self.num_districts)
+                ]
+            )
+            + self.alpha
+            * (gp.quicksum(self.slack[j] for j in range(self.num_districts))),
+            gp.GRB.MINIMIZE,
+        )
+
+    def _find_solution(self) -> Tuple[List[List[int]], int]:
+        total_value = 0
+        in_district = [False] * self.num_counties
+        districts = [[] for _ in range(self.num_districts)]
+
+        for j in range(self.num_districts):
+            source = random.choice(
+                [i for i in range(self.num_counties) if not in_district[i]]
+            )
+            districts[j], value = self._find_district(source, in_district)
+            total_value += value
+
+        return districts, total_value
+
+    def optimize(self):
+        random.seed(0)
+
+        best_value = float("inf")
+        best_solution = None
+
+        for _ in range(self.iterations):
+            solution, value = self._find_solution()
+            if value < best_value:
+                best_value = value
+                best_solution = solution
 
 
 # ---------------------------------------------------#
