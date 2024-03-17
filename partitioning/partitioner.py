@@ -14,6 +14,10 @@ from settings.local_settings import DATA_PATH
 
 
 class DistrictPartitioner:
+    def __init__(self, state: str):
+        self.state = state
+        self._read_data()
+
     def _read_data(self):
         path = os.path.join(DATA_PATH, self.state, "counties", "graph")
         population_file = os.path.join(path, f"{self.state}.population")
@@ -27,15 +31,16 @@ class DistrictPartitioner:
                     self.num_districts = int(parts[1])
                     break
 
-        self.population = {}
+        self.population = []
         with open(population_file, "r") as file:
             self.total_population = int(next(file).split("=")[-1].strip())
             for line in file:
                 ind, pop = line.split()
-                self.population[int(ind)] = int(pop)
-        self.num_counties = len(self.population.keys())
+                self.population.append(int(pop))
+        self.num_counties = len(self.population)
 
-        self.distances = {}
+        self.distances = [[0] * self.num_counties for _ in range(self.num_counties)]
+        self.edges = {i: [] for i in range(self.num_counties)}
         with open(neighbors_file, "r") as file:
             next(file)
             for line in file:
@@ -45,33 +50,14 @@ class DistrictPartitioner:
                 _, start, end = line.split()
                 start = int(start)
                 end = int(end)
-                self.distances[start, end] = 1
-
-        matrix = [
-            [0 for _ in range(self.num_counties)] for _ in range(self.num_counties)
-        ]
+                self.edges[start].append(end)
+                self.edges[end].append(start)
 
         with open(distances_file, "r") as file:
             next(file)
             for i, line in enumerate(file):
                 for j, val in enumerate(line.split(",")[1:]):
-                    matrix[i][j] = val
-
-        for i, j in self.distances:
-            self.distances[i, j] = matrix[i][j]
-
-    def __init__(self, state: str):
-        self.state = state
-        self._read_data()
-
-    def optimize(self):
-        raise NotImplementedError
-
-    def print_solution(self):
-        raise NotImplementedError
-
-    def _get_district_counties(self):
-        raise NotImplementedError
+                    self.distances[i][j] = val
 
     def show_map(self):
         shape_file = os.path.join(
@@ -100,127 +86,136 @@ class DistrictPartitioner:
         )
         plt.show()
 
+    def optimize(self):
+        raise NotImplementedError
+
+    def print_solution(self):
+        raise NotImplementedError
+
+    def _get_district_counties(self):
+        raise NotImplementedError
+
 
 # ---------------------------------------------------#
 
 
 class OptimalPartitioner(DistrictPartitioner):
+    def __init__(self, state: str, alpha: float):
+        super().__init__(state)
+        self._create_model(alpha)
+
     def _create_model(self, alpha: float):
         self.alpha = alpha
         self.model = gp.Model("model")
 
-        self.x = {}
-        self.source = {}
-        for i in range(self.num_counties):
-            for j in range(self.num_districts):
-                self.x[i, j] = self.model.addVar(
-                    vtype=gp.GRB.BINARY, name="x_{}_{}".format(i, j)
-                )
-                self.source[i, j] = self.model.addVar(
-                    vtype=gp.GRB.BINARY, name="source_{}_{}".format(i, j)
-                )
+        self.x = {
+            (i, j): self.model.addVar(vtype=gp.GRB.BINARY, name=f"x_{i}_{j}")
+            for i in range(self.num_counties)
+            for j in range(self.num_counties)
+        }
 
-        self.y = {}
-        self.flow = {}
-        for i, k in self.distances:
-            for j in range(self.num_districts):
-                self.y[i, k, j] = self.model.addVar(
-                    vtype=gp.GRB.BINARY, name="y_{}_{}_{}".format(i, k, j)
-                )
-                if i < k:
-                    self.flow[i, k, j] = self.model.addVar(
-                        vtype=gp.GRB.INTEGER, name="flow_{}_{}_{}".format(i, k, j)
-                    )
+        self.y = {
+            (i, j, k): self.model.addVar(vtype=gp.GRB.BINARY, name=f"y_{i}_{j}_{k}")
+            for i in range(self.num_counties)
+            for j in range(self.num_counties)
+            for k in range(j + 1, self.num_counties)
+        }
 
-        self.slack = {}
-        for j in range(self.num_districts):
-            self.slack[j] = self.model.addVar(vtype=gp.GRB.CONTINUOUS, name="slack")
+        self.flow = {
+            (i, j, k): self.model.addVar(vtype=gp.GRB.INTEGER, name=f"flow_{i}_{j}_{k}")
+            for i in range(self.num_counties)
+            for j in range(self.num_counties)
+            for k in self.edges[j]
+        }
+
+        self.slack = [
+            self.model.addVar(vtype=gp.GRB.CONTINUOUS) for _ in range(self.num_counties)
+        ]
+
+        avg_population = self.total_population / self.num_districts
 
         self.model.setObjective(
+            # Minimize within-district distances
             gp.quicksum(
-                self.y[i, k, j] * self.distances[i, k]
-                for i, k in self.distances
-                for j in range(self.num_districts)
+                self.y[i, j, k] * self.distances[i][k]
+                for i in range(self.num_counties)
+                for j in range(self.num_counties)
+                for k in range(j + 1, self.num_counties)
             )
+            # Minimize population imbalance
             + self.alpha
-            * (gp.quicksum(self.slack[j] for j in range(self.num_districts))),
+            * avg_population
+            * gp.quicksum(self.slack[j] for j in range(self.num_counties)),
             gp.GRB.MINIMIZE,
         )
 
-        for i, k in self.distances:
-            for j in range(self.num_districts):
-                # Edges can only be included if both endpoints are included
-                self.model.addConstr(self.x[i, j] + self.x[k, j] <= 1 + self.y[i, k, j])
-                # Edges must be included if both endpoints are included
-                self.model.addConstr(self.x[i, j] + self.x[k, j] >= 2 * self.y[i, k, j])
-                # Included edges must have flow
-                # if i < k:
-                #     self.model.addConstr(self.flow[i, k, j] >= self.y[i, k, j])
+        for i in range(self.num_counties):
+            for j in range(self.num_counties):
+                for k in range(j + 1, self.num_counties):
+                    # If two endpoints are in the same district,
+                    # the distance between them also has to be
+                    self.model.addConstr(
+                        self.y[i, j, k] >= self.x[i, j] + self.x[i, k] - 1
+                    )
 
-        for j in range(self.num_districts):
+        for i in range(self.num_counties):
+            # Population greater than lower bound
             self.model.addConstr(
-                gp.quicksum(self.source[i, j] for i in range(self.num_counties)) == 1
+                gp.quicksum(
+                    self.x[i, j] * self.population[j] for j in range(self.num_counties)
+                )
+                >= avg_population * self.x[i, i] * (1 - self.slack[i])
+            )
+            # Population less than upper bound
+            self.model.addConstr(
+                gp.quicksum(
+                    self.x[i, j] * self.population[j] for j in range(self.num_counties)
+                )
+                <= avg_population * self.x[i, i] * (1 + self.slack[i])
+            )
+
+        # Exactly num_districts district "centers"
+        self.model.addConstr(
+            gp.quicksum(self.x[i, i] for i in range(self.num_counties))
+            == self.num_districts
+        )
+
+        for j in range(self.num_counties):
+            # Each county assigned to exactly one district
+            self.model.addConstr(
+                gp.quicksum(self.x[i, j] for i in range(self.num_counties)) == 1
             )
             for i in range(self.num_counties):
-                self.model.addConstr(self.x[i, j] >= self.source[i, j])
+                # Counties are only assigned to district centers
+                self.model.addConstr(self.x[i, j] <= self.x[i, i])
 
-                # Sources must have adequate outgoing flow
-                print(i)
-                out_neighbors = [
-                    k
-                    for k in range(i + 1, self.num_counties)
-                    if self.distances.get((i, k), -1) != -1
-                ]
-                print(out_neighbors)
-                self.model.addConstr(
-                    self.source[i, j]
-                    * (
-                        gp.quicksum(self.x[k, j] for k in range(self.num_counties))
-                        - gp.quicksum(self.flow[i, k, j] for k in out_neighbors)
-                        - 1
+                if i != j:
+                    # Non-centers consume adequate flow
+                    self.model.addConstr(
+                        self.x[i, j]
+                        + gp.quicksum(
+                            self.flow[i, j, k] - self.flow[i, k, j]
+                            for k in self.edges[j]
+                        )
+                        == 0
                     )
-                    == 0
-                )
-                # Non-sources must have adequate outgoing flow
-                in_neighbors = [
-                    k for k in range(i) if self.distances.get((k, i), -1) != -1
-                ]
-                print(in_neighbors)
-                self.model.addConstr(
-                    (1 - self.source[i, j])
-                    * (
-                        gp.quicksum(self.flow[k, i, j] for k in in_neighbors)
-                        - gp.quicksum(self.flow[i, k, j] for k in out_neighbors)
-                        - 1
+                else:
+                    # District center has adequate outgoing flow
+                    self.model.addConstr(
+                        self.x[j, j]
+                        + gp.quicksum(
+                            self.flow[j, j, k] - self.flow[j, k, j]
+                            for k in self.edges[j]
+                        )
+                        - gp.quicksum(self.x[j, k] for k in range(self.num_counties))
+                        == 0
                     )
-                    == self.x[i, j] - 1
+                # Counties must be within district to receive flow
+                self.model.addConstr(
+                    self.num_counties * self.x[i, j]
+                    - gp.quicksum(self.flow[i, k, j] for k in self.edges[j])
+                    >= 0
                 )
-
-        # Add population constraint with slack variable
-        for j in range(self.num_districts):
-            # Slack must put population within range
-            self.model.addConstr(
-                gp.quicksum(
-                    self.x[i, j] * self.population[i] for i in range(self.num_counties)
-                )
-                >= ((self.total_population / self.num_districts) - self.slack[j])
-            )
-            self.model.addConstr(
-                gp.quicksum(
-                    self.x[i, j] * self.population[i] for i in range(self.num_counties)
-                )
-                <= ((self.total_population / self.num_districts) + self.slack[j])
-            )
-
-        # Each county is assigned to exactly one district
-        for i in range(self.num_counties):
-            self.model.addConstr(
-                gp.quicksum(self.x[i, j] for j in range(self.num_districts)) == 1
-            )
-
-    def __init__(self, state: str, alpha: float):
-        super().__init__(state)
-        self._create_model(alpha)
 
     def optimize(self):
         self.model.optimize()
@@ -233,13 +228,14 @@ class OptimalPartitioner(DistrictPartitioner):
         if self.model.status == GRB.OPTIMAL:
             print("\nObjective Value: %g" % self.model.ObjVal)
             for i in range(self.num_counties):
-                for j in range(self.num_districts):
-                    if self.x[i, j].X > 0:
+                for j in range(self.num_counties):
+                    if self.x[i, j].X != 0:
                         print("x_{}_{} = {}".format(i, j, self.x[i, j].X))
-            for i, k in self.distances:
-                for j in range(self.num_districts):
-                    if self.y[i, k, j].X > 0:
-                        print(f"y_{i}_{k}_{j} = {self.y[i, k, j].X}")
+            for i in range(self.num_districts):
+                for j in range(self.num_counties):
+                    for k in range(j + 1, self.num_counties):
+                        if self.y[i, j, k].X != 0:
+                            print(f"y_{i}_{k}_{j} = {self.y[i, j, k].X}")
             for j in range(self.num_districts):
                 print("slack_{} = {}".format(j, self.slack[j].X))
         else:
@@ -247,81 +243,9 @@ class OptimalPartitioner(DistrictPartitioner):
 
     def _get_district_counties(self):
         return [
-            {i for i in range(self.num_counties) if self.x[i, j].X > 0.5}
-            for j in range(self.num_districts)
+            {j for j in range(self.num_counties) if self.x[i, j].X > 0.5}
+            for i in range(self.num_counties)
         ]
-
-
-# ---------------------------------------------------#
-
-
-class IterativePartitioner(DistrictPartitioner):
-    def __init__(self, state: str, alpha=1.0, iterations=1):
-        self.alpha = alpha
-        self.iterations = iterations
-        super().__init__(state)
-
-    def _find_district(
-        self, source: int, in_district: List[bool]
-    ) -> Tuple[List[int], int]:
-        model = gp.Model("model")
-
-        nodes = np.arange(self.num_counties)[~in_district]
-        x = np.repeat(model.addVar(vtype=GRB.BINARY), nodes.shape[0])
-        y = np.array(
-            [
-                model.addVar(vtype=GRB.BINARY)
-                for i, k in self.distances
-                if not in_district[i] and not in_district[k]
-            ]
-        )
-        flow = np.array(
-            [
-                model.addVar(vtype=GRB.INTEGER)
-                for i, k in self.distances
-                if i < k and not in_district[i] and not in_district[k]
-            ]
-        )
-        self.slack = np.repeat(model.addVar(vtype=GRB.CONTINUOUS), self.num_districts)
-
-        self.model.setObjective(
-            np.sum(
-                [
-                    self.y[i, k, j] * self.distances[i, k]
-                    for i, k in self.distances
-                    for j in range(self.num_districts)
-                ]
-            )
-            + self.alpha
-            * (gp.quicksum(self.slack[j] for j in range(self.num_districts))),
-            gp.GRB.MINIMIZE,
-        )
-
-    def _find_solution(self) -> Tuple[List[List[int]], int]:
-        total_value = 0
-        in_district = [False] * self.num_counties
-        districts = [[] for _ in range(self.num_districts)]
-
-        for j in range(self.num_districts):
-            source = random.choice(
-                [i for i in range(self.num_counties) if not in_district[i]]
-            )
-            districts[j], value = self._find_district(source, in_district)
-            total_value += value
-
-        return districts, total_value
-
-    def optimize(self):
-        random.seed(0)
-
-        best_value = float("inf")
-        best_solution = None
-
-        for _ in range(self.iterations):
-            solution, value = self._find_solution()
-            if value < best_value:
-                best_value = value
-                best_solution = solution
 
 
 # ---------------------------------------------------#
