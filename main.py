@@ -1,9 +1,10 @@
 import argparse
-from partitioning.partitioner import OptimalPartitioner
+from partitioning.partitioner import OptimalPartitioner, MetisPartitioner
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Districting")
     parser.add_argument("-s", "--state", default="RI", help="State to district")
+    parser.add_argument("-t", "--type", default="optimal", help="Type of partitioner")
     parser.add_argument(
         "-a",
         "--alpha",
@@ -20,7 +21,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    dp = OptimalPartitioner(args.state, args.alpha)
+    if args.type == "metis":
+        dp = MetisPartitioner(args.state)
+    else:
+        dp = OptimalPartitioner(args.state, args.alpha)
+
     dp.optimize()
     if args.verbose:
         dp.print_solution()

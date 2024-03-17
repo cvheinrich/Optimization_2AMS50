@@ -1,6 +1,6 @@
 import os
 import random
-from typing import List, Tuple
+from typing import List, Dict
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -14,11 +14,11 @@ from settings.local_settings import DATA_PATH
 
 
 class DistrictPartitioner:
-    def __init__(self, state: str):
+    def __init__(self, state: str) -> None:
         self.state = state
         self._read_data()
 
-    def _read_data(self):
+    def _read_data(self) -> None:
         path = os.path.join(DATA_PATH, self.state, "counties", "graph")
         population_file = os.path.join(path, f"{self.state}.population")
         distances_file = os.path.join(path, f"{self.state}_distances.csv")
@@ -57,9 +57,9 @@ class DistrictPartitioner:
             next(file)
             for i, line in enumerate(file):
                 for j, val in enumerate(line.split(",")[1:]):
-                    self.distances[i][j] = val
+                    self.distances[i][j] = int(val)
 
-    def show_map(self):
+    def show_map(self) -> None:
         shape_file = os.path.join(
             DATA_PATH, self.state, "counties", "maps", f"{self.state}_counties.shp"
         )
@@ -100,11 +100,11 @@ class DistrictPartitioner:
 
 
 class OptimalPartitioner(DistrictPartitioner):
-    def __init__(self, state: str, alpha: float):
+    def __init__(self, state: str, alpha: float) -> None:
         super().__init__(state)
         self._create_model(alpha)
 
-    def _create_model(self, alpha: float):
+    def _create_model(self, alpha: float) -> None:
         self.alpha = alpha
         self.model = gp.Model("model")
 
@@ -217,14 +217,14 @@ class OptimalPartitioner(DistrictPartitioner):
                     >= 0
                 )
 
-    def optimize(self):
+    def optimize(self) -> gp.Model:
         self.model.optimize()
         if self.model.status == GRB.INFEASIBLE:
             self.model.computeIIS()
             self.model.write("model.ilp")
         return self.model
 
-    def print_solution(self):
+    def print_solution(self) -> None:
         if self.model.status == GRB.OPTIMAL:
             print("\nObjective Value: %g" % self.model.ObjVal)
             for i in range(self.num_counties):
@@ -241,7 +241,7 @@ class OptimalPartitioner(DistrictPartitioner):
         else:
             print("No solution")
 
-    def _get_district_counties(self):
+    def _get_district_counties(self) -> List[Dict]:
         return [
             {j for j in range(self.num_counties) if self.x[i, j].X > 0.5}
             for i in range(self.num_counties)
@@ -254,3 +254,23 @@ class OptimalPartitioner(DistrictPartitioner):
 class MetisPartitioner(DistrictPartitioner):
     def __init__(self, state: str):
         super().__init__(state)
+
+    def optimize(self):
+        n = self.num_counties
+        xadj = [i for i in range(0, n * (n - 1), n - 1)]
+        adjncy = [j for i in range(n) for j in range(n) if i != j]
+        eweights = [self.distances[i][j] for i in range(n) for j in range(n) if i != j]
+        vweights = self.population
+        contiguous = True
+
+        (edgecuts, part) = metis.part_graph(
+            nparts=self.num_districts,
+            xadj=xadj,
+            adjncy=adjncy,
+            eweights=eweights,
+            vweights=vweights,
+            contiguous=contiguous,
+        )
+
+        print("Edgecuts: ", edgecuts)
+        print("Part: ", part)
