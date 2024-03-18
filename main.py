@@ -24,9 +24,11 @@ if __name__ == "__main__":
     if args.type == "metis":
         dp = MetisPartitioner(args.state)
     else:
-        dp = OptimalPartitioner(args.state, args.alpha)
+        dp = OptimalPartitioner(
+            args.state, args.alpha, slack_type="dynamic", slack_value=0.35
+        )
 
-    dp.optimize()
+    dp.optimize(gap=0, slack_step=0.1)
     if args.verbose:
         dp.print_solution()
     if args.map:

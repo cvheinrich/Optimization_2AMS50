@@ -1,5 +1,4 @@
 import os
-import random
 from typing import List, Dict
 
 import gurobipy as gp
@@ -14,11 +13,29 @@ from settings.local_settings import DATA_PATH
 
 
 class DistrictPartitioner:
+    """
+    Base class for district partitioning
+    """
+
     def __init__(self, state: str) -> None:
+        """
+        Initialize partitioner with state data
+
+        @param state: State to partition
+        """
+
         self.state = state
         self._read_data()
 
     def _read_data(self) -> None:
+        """
+        Read data from files, including:
+        - Population of each county
+        - Distance between each pair of counties
+        - Adjacency list of counties (for drawing map)
+        - Number of districts
+        """
+
         path = os.path.join(DATA_PATH, self.state, "counties", "graph")
         population_file = os.path.join(path, f"{self.state}.population")
         distances_file = os.path.join(path, f"{self.state}_distances.csv")
@@ -60,6 +77,12 @@ class DistrictPartitioner:
                     self.distances[i][j] = int(val)
 
     def show_map(self) -> None:
+        """
+        Show map of counties with districts colored
+
+        TODO: Add population data to map
+        """
+
         shape_file = os.path.join(
             DATA_PATH, self.state, "counties", "maps", f"{self.state}_counties.shp"
         )
@@ -100,12 +123,33 @@ class DistrictPartitioner:
 
 
 class OptimalPartitioner(DistrictPartitioner):
-    def __init__(self, state: str, alpha: float) -> None:
-        super().__init__(state)
-        self._create_model(alpha)
+    SLACK_FIXED = "fixed"
+    SLACK_VARIABLE = "var"
+    SLACK_DYNAMIC = "dynamic"
 
-    def _create_model(self, alpha: float) -> None:
+    def __init__(
+        self, state: str, alpha: float, slack_type="var", slack_value=None
+    ) -> None:
+        """
+        Initialize optimal partitioner.
+
+        @param state: State to partition
+        @param alpha: Weight for population imbalance
+        @param slack_type: Type of slack to use: "fixed", "var", or "dynamic"
+        @param slack_value: Value of slack to use (irrelevant in case of slack_type="var")
+        """
+
+        super().__init__(state)
         self.alpha = alpha
+        self.slack_type = slack_type
+        self.slack_value = slack_value
+        self.avg_population = self.total_population / self.num_districts
+        self._create_model()
+
+    def _create_model(self) -> None:
+        """
+        Create gurobi model for partitioning
+        """
         self.model = gp.Model("model")
 
         self.x = {
@@ -128,24 +172,37 @@ class OptimalPartitioner(DistrictPartitioner):
             for k in self.edges[j]
         }
 
-        self.slack = [
-            self.model.addVar(vtype=gp.GRB.CONTINUOUS) for _ in range(self.num_counties)
-        ]
-
-        avg_population = self.total_population / self.num_districts
+        if self.slack_type == OptimalPartitioner.SLACK_VARIABLE:
+            self.slack = [
+                self.model.addVar(vtype=gp.GRB.CONTINUOUS)
+                for _ in range(self.num_counties)
+            ]
+        elif self.slack_type == OptimalPartitioner.SLACK_DYNAMIC:
+            self.slack = [
+                (
+                    self.slack_value
+                    if self.population[i] < self.avg_population
+                    else self.population[i] / self.avg_population - 1 + self.slack_value
+                )
+                for i in range(self.num_counties)
+            ]
+        else:  # fixed
+            self.slack = [self.slack_value for _ in range(self.num_counties)]
 
         self.model.setObjective(
             # Minimize within-district distances
-            gp.quicksum(
-                self.y[i, j, k] * self.distances[i][k]
-                for i in range(self.num_counties)
-                for j in range(self.num_counties)
-                for k in range(j + 1, self.num_counties)
-            )
-            # Minimize population imbalance
-            + self.alpha
-            * avg_population
-            * gp.quicksum(self.slack[j] for j in range(self.num_counties)),
+            (
+                gp.quicksum(
+                    self.y[i, j, k] * self.distances[i][k]
+                    for i in range(self.num_counties)
+                    for j in range(self.num_counties)
+                    for k in range(j + 1, self.num_counties)
+                )
+                # Minimize population imbalance
+                + self.alpha
+                * self.avg_population
+                * gp.quicksum(self.slack[j] for j in range(self.num_counties))
+            ),
             gp.GRB.MINIMIZE,
         )
 
@@ -164,14 +221,14 @@ class OptimalPartitioner(DistrictPartitioner):
                 gp.quicksum(
                     self.x[i, j] * self.population[j] for j in range(self.num_counties)
                 )
-                >= avg_population * self.x[i, i] * (1 - self.slack[i])
+                >= self.avg_population * self.x[i, i] * (1 - self.slack[i])
             )
             # Population less than upper bound
             self.model.addConstr(
                 gp.quicksum(
                     self.x[i, j] * self.population[j] for j in range(self.num_counties)
                 )
-                <= avg_population * self.x[i, i] * (1 + self.slack[i])
+                <= self.avg_population * self.x[i, i] * (1 + self.slack[i])
             )
 
         # Exactly num_districts district "centers"
@@ -217,14 +274,49 @@ class OptimalPartitioner(DistrictPartitioner):
                     >= 0
                 )
 
-    def optimize(self) -> gp.Model:
+    def update_model(self, alpha: float, slack_type: str, slack_value: float) -> None:
+        """
+        Update model with new parameters
+        """
+        self.alpha = alpha
+        self.slack_type = slack_type
+        self.slack_value = slack_value
+        self._create_model()
+
+    def optimize(self, gap=0, slack_step=0.1) -> gp.Model:
+        """
+        Optimize model.
+
+        @param gap: MIP gap
+        @param slack_step: Step size for increasing slack_value in case of infeasible model
+        """
+        self.model.Params.MIPGap = gap
         self.model.optimize()
+
+        if (
+            self.slack_type
+            in [OptimalPartitioner.SLACK_FIXED, OptimalPartitioner.SLACK_DYNAMIC]
+            and slack_step > 0
+        ):
+            print(
+                "Increasing slack until feasible model is found. Set slack_step=0 to disable."
+            )
+            while self.model.status != GRB.OPTIMAL:
+                self.slack_value += slack_step
+                print(f"Slack: {self.slack_value}")
+                self.update_model(self.alpha, self.slack_type, self.slack_value)
+                self.model.optimize()
+
         if self.model.status == GRB.INFEASIBLE:
             self.model.computeIIS()
             self.model.write("model.ilp")
         return self.model
 
     def print_solution(self) -> None:
+        """
+        Print solution of model
+        """
+
         if self.model.status == GRB.OPTIMAL:
             print("\nObjective Value: %g" % self.model.ObjVal)
             for i in range(self.num_counties):
@@ -253,9 +345,17 @@ class OptimalPartitioner(DistrictPartitioner):
 
 class MetisPartitioner(DistrictPartitioner):
     def __init__(self, state: str):
+        """
+        Initialize METIS partitioner
+        """
+
         super().__init__(state)
 
     def optimize(self):
+        """
+        Optimize partitioning using METIS
+        """
+
         n = self.num_counties
         xadj = [i for i in range(0, n * (n - 1), n - 1)]
         adjncy = [j for i in range(n) for j in range(n) if i != j]
