@@ -1,5 +1,5 @@
 import argparse
-from partitioning.partitioner import OptimalPartitioner, MetisPartitioner
+from partitioning.partitioner import OptimalPartitioner as OP, MetisPartitioner
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Districting")
@@ -30,12 +30,17 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    p_type = args.type
 
-    if args.type == "metis":
+    if p_type == "metis":
         dp = MetisPartitioner(args.state)
-    elif args.type in ["fixed", "dynamic", "var", "optimal"]:
-        slack_type = args.type if args.type in ["fixed", "dynamic"] else "var"
-        dp = OptimalPartitioner(
+    elif p_type in OP.SLACK_TYPES + ["optimal"]:
+        slack_type = (
+            p_type
+            if p_type in [OP.SLACK_FIXED, OP.SLACK_DYNAMIC]
+            else OP.SLACK_VARIABLE
+        )
+        dp = OP(
             args.state, args.alpha, slack_type=slack_type, slack_value=args.slack_value
         )
         dp.optimize(gap=args.gap, slack_step=0.1)

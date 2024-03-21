@@ -93,9 +93,7 @@ class DistrictPartitioner:
         districts = self._get_district_counties()
         for district, counties in enumerate(districts):
             for county in counties:
-                counties_gdf.loc[counties_gdf["county_id"] == county, "district"] = (
-                    district
-                )
+                counties_gdf.loc[counties_gdf["county_id"] == county, "district"] = district
 
         color_map = plt.get_cmap("tab20", self.num_districts)
 
@@ -108,12 +106,9 @@ class DistrictPartitioner:
             cmap=color_map,
         )
 
-        district_pop = [
-            sum(self.population[j] for j in district) for district in districts
-        ]
+        district_pop = [sum(self.population[j] for j in district) for district in districts]
         district_dist = [
-            sum(self.distances[i][j] for i in district for j in district)
-            for district in districts
+            sum(self.distances[i][j] for i in district for j in district) for district in districts
         ]
         legend_elements = [
             Patch(
@@ -152,10 +147,9 @@ class OptimalPartitioner(DistrictPartitioner):
     SLACK_FIXED = "fixed"
     SLACK_VARIABLE = "var"
     SLACK_DYNAMIC = "dynamic"
+    SLACK_TYPES = [SLACK_FIXED, SLACK_VARIABLE, SLACK_DYNAMIC]
 
-    def __init__(
-        self, state: str, alpha: float, slack_type="var", slack_value=None
-    ) -> None:
+    def __init__(self, state: str, alpha: float, slack_type="var", slack_value=None) -> None:
         """
         Initialize optimal partitioner.
 
@@ -200,8 +194,7 @@ class OptimalPartitioner(DistrictPartitioner):
 
         if self.slack_type == OptimalPartitioner.SLACK_VARIABLE:
             self.slack = [
-                self.model.addVar(vtype=gp.GRB.CONTINUOUS)
-                for _ in range(self.num_counties)
+                self.model.addVar(vtype=gp.GRB.CONTINUOUS) for _ in range(self.num_counties)
             ]
         elif self.slack_type == OptimalPartitioner.SLACK_DYNAMIC:
             self.slack = [
@@ -237,37 +230,28 @@ class OptimalPartitioner(DistrictPartitioner):
                 for k in range(j + 1, self.num_counties):
                     # If two endpoints are in the same district,
                     # the distance between them also has to be
-                    self.model.addConstr(
-                        self.y[i, j, k] >= self.x[i, j] + self.x[i, k] - 1
-                    )
+                    self.model.addConstr(self.y[i, j, k] >= self.x[i, j] + self.x[i, k] - 1)
 
         for i in range(self.num_counties):
             # Population greater than lower bound
             self.model.addConstr(
-                gp.quicksum(
-                    self.x[i, j] * self.population[j] for j in range(self.num_counties)
-                )
+                gp.quicksum(self.x[i, j] * self.population[j] for j in range(self.num_counties))
                 >= self.avg_population * self.x[i, i] * (1 - self.slack[i])
             )
             # Population less than upper bound
             self.model.addConstr(
-                gp.quicksum(
-                    self.x[i, j] * self.population[j] for j in range(self.num_counties)
-                )
+                gp.quicksum(self.x[i, j] * self.population[j] for j in range(self.num_counties))
                 <= self.avg_population * self.x[i, i] * (1 + self.slack[i])
             )
 
         # Exactly num_districts district "centers"
         self.model.addConstr(
-            gp.quicksum(self.x[i, i] for i in range(self.num_counties))
-            == self.num_districts
+            gp.quicksum(self.x[i, i] for i in range(self.num_counties)) == self.num_districts
         )
 
         for j in range(self.num_counties):
             # Each county assigned to exactly one district
-            self.model.addConstr(
-                gp.quicksum(self.x[i, j] for i in range(self.num_counties)) == 1
-            )
+            self.model.addConstr(gp.quicksum(self.x[i, j] for i in range(self.num_counties)) == 1)
             for i in range(self.num_counties):
                 # Counties are only assigned to district centers
                 self.model.addConstr(self.x[i, j] <= self.x[i, i])
@@ -277,8 +261,7 @@ class OptimalPartitioner(DistrictPartitioner):
                     self.model.addConstr(
                         self.x[i, j]
                         + gp.quicksum(
-                            self.flow[i, j, k] - self.flow[i, k, j]
-                            for k in self.edges[j]
+                            self.flow[i, j, k] - self.flow[i, k, j] for k in self.edges[j]
                         )
                         == 0
                     )
@@ -287,8 +270,7 @@ class OptimalPartitioner(DistrictPartitioner):
                     self.model.addConstr(
                         self.x[j, j]
                         + gp.quicksum(
-                            self.flow[j, j, k] - self.flow[j, k, j]
-                            for k in self.edges[j]
+                            self.flow[j, j, k] - self.flow[j, k, j] for k in self.edges[j]
                         )
                         - gp.quicksum(self.x[j, k] for k in range(self.num_counties))
                         == 0
@@ -320,13 +302,10 @@ class OptimalPartitioner(DistrictPartitioner):
         self.model.optimize()
 
         if (
-            self.slack_type
-            in [OptimalPartitioner.SLACK_FIXED, OptimalPartitioner.SLACK_DYNAMIC]
+            self.slack_type in [OptimalPartitioner.SLACK_FIXED, OptimalPartitioner.SLACK_DYNAMIC]
             and slack_step > 0
         ):
-            print(
-                "Increasing slack until feasible model is found. Set slack_step=0 to disable."
-            )
+            print("Increasing slack until feasible model is found. Set slack_step=0 to disable.")
             while self.model.status != GRB.OPTIMAL:
                 self.slack_value += slack_step
                 print(f"Slack: {self.slack_value}")
@@ -402,3 +381,52 @@ class MetisPartitioner(DistrictPartitioner):
 
         print("Edgecuts: ", edgecuts)
         print("Part: ", part)
+
+
+# ---------------------------------------------------#
+
+
+class SwamyPartitioner(DistrictPartitioner):
+    """
+    Steps of the partitioner as described in Swamy et al. (2022):
+    1. Coarsen the graph:
+        - Merge nodes until the graph is small enough to be solved by exact methods:
+            - This can be done by iteratively finding maximal matchings or a maximum matchings.
+            - To find compact maximum matchings:
+                - Sort neighbor edges by the sum of populations of the two endpoints (adding
+                the distance could also be considered)
+                - Iterate over edges in non-decreasing order, add the current edge to the matching
+                if it does not have an already included endpoint.
+            - Merged on edges in the matching
+    2. Solve districting problem on coarsened graph:
+        - The exact method in `OptimalPartitioner` can be used
+        - It is advantageous to start from an initial feasible solution:
+            - Select random node not in a district
+            - Attach random neighbor until the population exceeds the average
+            - Repeat until all nodes are in a district
+            - If K districts were found => done
+            - If more than K => merge districts (possibly with the smallest populations)
+            - If less than K => start over
+        - The initial solution can be improved by the method described in 3. Uncoarsening
+    3. Uncoarsen the graph:
+        - Unmerge nodes to previous level (i.e. first undo the last matching merge, then the second
+          to last, etc)
+        - Use local improvement heuristic to improve solution:
+            - The method used in the paper selects the county-neighboring district pair, that would
+              improve the compactness objective the most, if the county was to be reassigned to the
+              neighboring district.
+            - Local search can be terminated after a certain number of iterations or when no improvement
+              is found
+            - Potentially useful data structures:
+                - A data structure maintaining the list of counties neighboring other districts
+                - A data structure maintaining the contribution of each county to the compactness objective
+        - Repeat until the original graph is reached
+
+    """
+
+    def __init__(self):
+        """
+        Initialize Swamy partitioner
+        """
+
+        super().__init__()
