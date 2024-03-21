@@ -1,5 +1,6 @@
 import argparse
-from partitioning.partitioner import OptimalPartitioner as OP, MetisPartitioner
+from partitioning.swamy.optimal import OptimalPartitioner as OP
+from partitioning.metis import MetisPartitioner
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Districting")
