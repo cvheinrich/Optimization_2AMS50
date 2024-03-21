@@ -65,15 +65,28 @@ class HeuristicPartitioner(DistrictPartitioner):
 
         return HeuristicPartitioner(state, *DistrictPartitioner._read_files(state), slack_value)
 
-    def _solve_exact(self, G: Dict[int, List], P: List[int], D: Dict[Tuple[int, int], int]):
+    def _solve_exact(self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int]):
         """
         Solve districting problem on coarsened graph using exact methods
         """
+        ind_map = dict(zip(P.keys(), list(range(len(P)))))
 
+        edges = {}
+        for i in G:
+            edges[ind_map[i]] = [ind_map[j] for j in G[i]]
+        populations = list(P.values())
         distances = [[0] * len(P) for _ in range(len(P))]
         for i, j in D:
-            distances[i][j] = D[i, j]
-        partitioner = OptimalPartitioner(self.state, self.num_districts, G, P, distances)
+            distances[ind_map[i]][ind_map[j]] = D[i, j]
+
+        partitioner = OptimalPartitioner(
+            self.state,
+            min(self.num_districts, len(P)),
+            edges,
+            populations,
+            distances,
+            slack_type=OptimalPartitioner.SLACK_VARIABLE,
+        )
         partitioner.optimize()
 
         partitions = {}
@@ -88,7 +101,7 @@ class HeuristicPartitioner(DistrictPartitioner):
     def _local_optimize(
         self,
         G: Dict[int, List],
-        P: List[int],
+        P: Dict[int, int],
         D: Dict[Tuple[int, int], int],
         partitions: Dict[int, List[int]],
     ) -> Dict[int, List[int]]:
@@ -98,11 +111,11 @@ class HeuristicPartitioner(DistrictPartitioner):
         return partitions
 
     def _optimize(
-        self, G: Dict[int, List], P: List[int], D: Dict[Tuple[int, int], int], size_limit: int
+        self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int], size_limit: int
     ) -> Dict[int, List[int]]:
-        if len(P) * self.num_districts > size_limit:
+        if len(P) > size_limit:
             # Find maximal matching (heuristic)
-            P_edges = sorted([(P[i] + P[j], i, j) for i in G for j in G[i]])
+            P_edges = sorted([(P[i] + P[j], i, j) for i in G for j in G[i] if i < j])
 
             matching = {}
             for _, i, j in P_edges:
@@ -112,23 +125,37 @@ class HeuristicPartitioner(DistrictPartitioner):
 
             # Merge nodes in matching
             new_G = {}
-            new_P = []
+            new_P = {}
             new_D = {}
-            for i in range(len(P)):
+            for i in P:
                 if i not in matching:
-                    new_G[i] = G[i].copy()
-                    new_P.append(P[i])
-                    for j in G:
-                        if (i, j) in D:
-                            new_D[j, i] = new_D[i, j] = D[i, j]
-                else:
-                    j = matching[i]
-                    new_G[i] = list(set(G[i]) | set(G[j]))
-                    new_P[i] = P[i] + P[j]
-                    for k in G:
-                        if (i, k) in D and (j, k) in D and k != i and k != j:
-                            # Improve
-                            new_D[i, k] = new_D[k, i] = (D[i, k] + D[j, k]) / 2
+                    new_P[i] = P[i]
+                    new_G[i] = []
+                elif i < matching[i]:
+                    new_P[i] = P[i] + P[matching[i]]
+                    new_G[i] = []
+
+            map_to_match = lambda i: i if i not in matching or i < matching[i] else matching[i]
+
+            for i in new_G:
+                neighbor_set = set(G[i]) if i not in matching else set(G[i]) | set(G[matching[i]])
+                new_G[i] = list({map_to_match(j) for j in neighbor_set})
+
+                distances = (
+                    {j: D[i, j] for j in G if i != j}
+                    if i not in matching
+                    else {
+                        j: (D[i, j] + D[matching[i], j]) / 2
+                        for j in G
+                        if i != j and matching[i] != j
+                    }
+                )
+
+                for j in distances:
+                    if j not in matching:
+                        new_D[i, j] = new_D[j, i] = distances[j]
+                    elif j < matching[j]:
+                        new_D[i, j] = new_D[j, i] = (distances[j] + distances[matching[j]]) / 2
 
             sub_partitions = self._optimize(new_G, new_P, new_D, size_limit)
             partitions = {i: [] for i in range(self.num_districts)}
@@ -145,16 +172,18 @@ class HeuristicPartitioner(DistrictPartitioner):
         else:
             return self._solve_exact(G, P, D)
 
-    def optimize(self, size_limit=50):
+    def optimize(self, size_limit=10):
         """
         Optimize partitioning using Swamy et al. (2022)
         """
 
+        P = {i: p for i, p in enumerate(self.populations)}
         D = {}
         for i in range(len(self.distances)):
             for j in range(i + 1, len(self.distances[i])):
                 D[i, j] = D[j, i] = self.distances[i][j]
-        self.partitions = self._optimize(self.edges, self.populations, D, size_limit)
+
+        self.partitions = self._optimize(self.edges, P, D, max(size_limit, self.num_districts))
 
         return self.partitions
 
