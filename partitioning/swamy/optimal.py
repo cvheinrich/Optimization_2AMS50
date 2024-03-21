@@ -17,10 +17,10 @@ class OptimalPartitioner(DistrictPartitioner):
         K: int,
         G: Dict[int, List],
         P: List[int],
-        D: Dict[Tuple[int, int], int],
-        alpha: float,
-        slack_type=SLACK_DYNAMIC,
-        slack_value=0.05,
+        D: List[List[int]],
+        alpha: float = 1.0,
+        slack_type: str = SLACK_DYNAMIC,
+        slack_value: float = 0.05,
     ) -> None:
         """
         Initialize optimal partitioner.
@@ -39,7 +39,7 @@ class OptimalPartitioner(DistrictPartitioner):
         self._create_model()
 
     def from_files(
-        state: str, alpha: float, slack_type: str, slack_value: float
+        state: str, alpha: float = 1.0, slack_type: str = SLACK_DYNAMIC, slack_value: float = 0.05
     ) -> "OptimalPartitioner":
         """
         Initialize optimal partitioner from files

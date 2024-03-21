@@ -1,5 +1,6 @@
 import argparse
 from partitioning.swamy.optimal import OptimalPartitioner as OP
+from partitioning.swamy.heuristic import HeuristicPartitioner
 from partitioning.metis import MetisPartitioner
 
 if __name__ == "__main__":
@@ -35,6 +36,9 @@ if __name__ == "__main__":
             args.state, args.alpha, slack_type=slack_type, slack_value=args.slack_value
         )
         dp.optimize(gap=args.gap, slack_step=0.1)
+    elif p_type == "swamy_h":
+        dp = HeuristicPartitioner.from_files(args.state, slack_value=args.slack_value)
+        dp.optimize()
 
     if args.verbose:
         dp.print_solution()

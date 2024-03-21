@@ -4,7 +4,7 @@ from partitioning.base import DistrictPartitioner
 from partitioning.swamy.optimal import OptimalPartitioner
 
 
-class SwamyPartitioner(DistrictPartitioner):
+class HeuristicPartitioner(DistrictPartitioner):
     """
     Steps of the partitioner as described in Swamy et al. (2022):
     1. Coarsen the graph:
@@ -42,21 +42,38 @@ class SwamyPartitioner(DistrictPartitioner):
 
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        state: str,
+        K: int,
+        G: Dict[int, List[int]],
+        P: List[int],
+        D: List[List[int]],
+        slack_value: float = 0.05,
+    ):
         """
         Initialize Swamy partitioner
         """
 
-        super().__init__()
+        super().__init__(state, K, G, P, D)
+        self.slack = slack_value
 
-    def _solve_exact(
-        self, G: Dict[int, List], P: List[int], D: Dict[Tuple[int, int], int], slack: float
-    ):
+    def from_files(state: str, slack_value: float = 0.05) -> "HeuristicPartitioner":
+        """
+        Initialize partitioner from files
+        """
+
+        return HeuristicPartitioner(state, *DistrictPartitioner._read_files(state), slack_value)
+
+    def _solve_exact(self, G: Dict[int, List], P: List[int], D: Dict[Tuple[int, int], int]):
         """
         Solve districting problem on coarsened graph using exact methods
         """
 
-        partitioner = OptimalPartitioner(self.state, self.num_districts, G, P, D)
+        distances = [[0] * len(P) for _ in range(len(P))]
+        for i, j in D:
+            distances[i][j] = D[i, j]
+        partitioner = OptimalPartitioner(self.state, self.num_districts, G, P, distances)
         partitioner.optimize()
 
         partitions = {}
@@ -68,14 +85,21 @@ class SwamyPartitioner(DistrictPartitioner):
 
         return partitions
 
-    def _optimize(
+    def _local_optimize(
         self,
         G: Dict[int, List],
         P: List[int],
         D: Dict[Tuple[int, int], int],
-        size_limit: int,
-        slack: float,
-    ) -> Dict[int, List]:
+        partitions: Dict[int, List[int]],
+    ) -> Dict[int, List[int]]:
+        """
+        Local optimization heuristic
+        """
+        return partitions
+
+    def _optimize(
+        self, G: Dict[int, List], P: List[int], D: Dict[Tuple[int, int], int], size_limit: int
+    ) -> Dict[int, List[int]]:
         if len(P) * self.num_districts > size_limit:
             # Find maximal matching (heuristic)
             P_edges = sorted([(P[i] + P[j], i, j) for i in G for j in G[i]])
@@ -106,7 +130,7 @@ class SwamyPartitioner(DistrictPartitioner):
                             # Improve
                             new_D[i, k] = new_D[k, i] = (D[i, k] + D[j, k]) / 2
 
-            sub_partitions = self._optimize(new_G, new_P, new_D, size_limit, slack)
+            sub_partitions = self._optimize(new_G, new_P, new_D, size_limit)
             partitions = {i: [] for i in range(self.num_districts)}
 
             # Unmerge nodes
@@ -119,14 +143,23 @@ class SwamyPartitioner(DistrictPartitioner):
             # Local optimization
             return self._local_optimize(G, P, D, partitions)
         else:
-            return self._solve_exact(G, P, D, slack)
+            return self._solve_exact(G, P, D)
 
-    def optimize(self, size_limit=50, slack=0.02):
+    def optimize(self, size_limit=50):
         """
         Optimize partitioning using Swamy et al. (2022)
         """
 
-        return self._optimize(self.edges, self.population, size_limit, slack)
-        # coarse_graph = self._coarsen_graph()
-        # coarse_partitioner = OptimalPartitioner(coarse_graph)
-        # return self.unmerge(coarse_partitioner.optimize(), size_limit, slack)
+        D = {}
+        for i in range(len(self.distances)):
+            for j in range(i + 1, len(self.distances[i])):
+                D[i, j] = D[j, i] = self.distances[i][j]
+        self.partitions = self._optimize(self.edges, self.populations, D, size_limit)
+
+        return self.partitions
+
+    def _get_district_counties(self) -> Dict[int, List[int]]:
+        return self.partitions
+
+    def print_solution(self):
+        print(self.partitions)
