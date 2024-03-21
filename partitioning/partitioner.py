@@ -1,14 +1,12 @@
 import os
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import gurobipy as gp
 from gurobipy import GRB
 from matplotlib.patches import Patch
 import pymetis as metis
 import geopandas as gpd
-import networkx as nx
 import matplotlib.pyplot as plt
-import numpy as np
 
 from settings.local_settings import DATA_PATH
 
@@ -18,17 +16,28 @@ class DistrictPartitioner:
     Base class for district partitioning
     """
 
-    def __init__(self, state: str) -> None:
+    def __init__(
+        self, state: str, K: int, G: Dict[int, List], P: List[int], D: List[List[int]]
+    ) -> None:
         """
         Initialize partitioner with state data
 
         @param state: State to partition
+        @param K: Number of districts
+        @param G: Adjacency list of counties
+        @param P: Population of each county
+        @param D: Distance between each pair of counties
         """
 
         self.state = state
-        self._read_data()
+        self.num_districts = K
+        self.edges = G
+        self.populations = P
+        self.num_counties = len(P)
+        self.total_population = sum(P)
+        self.distances = D
 
-    def _read_data(self) -> None:
+    def _read_files(state: str) -> Tuple[int, Dict[int, List], List[int], List[List[int]]]:
         """
         Read data from files, including:
         - Population of each county
@@ -37,28 +46,28 @@ class DistrictPartitioner:
         - Number of districts
         """
 
-        path = os.path.join(DATA_PATH, self.state, "counties", "graph")
-        population_file = os.path.join(path, f"{self.state}.population")
-        distances_file = os.path.join(path, f"{self.state}_distances.csv")
-        neighbors_file = os.path.join(path, f"{self.state}.dimacs")
+        path = os.path.join(DATA_PATH, state, "counties", "graph")
+        population_file = os.path.join(path, f"{state}.population")
+        distances_file = os.path.join(path, f"{state}_distances.csv")
+        neighbors_file = os.path.join(path, f"{state}.dimacs")
 
         with open(os.path.join(DATA_PATH, "Numberofdistricts.txt"), "r") as file:
             for line in file:
                 parts = line.strip().split("\t")
-                if parts[0] == self.state:
-                    self.num_districts = int(parts[1])
+                if parts[0] == state:
+                    num_districts = int(parts[1])
                     break
 
-        self.population = []
+        populations = []
         with open(population_file, "r") as file:
-            self.total_population = int(next(file).split("=")[-1].strip())
+            total_population = int(next(file).split("=")[-1].strip())
             for line in file:
                 ind, pop = line.split()
-                self.population.append(int(pop))
-        self.num_counties = len(self.population)
+                populations.append(int(pop))
+        num_counties = len(populations)
 
-        self.distances = [[0] * self.num_counties for _ in range(self.num_counties)]
-        self.edges = {i: [] for i in range(self.num_counties)}
+        distances = [[0] * num_counties for _ in range(num_counties)]
+        edges = {i: [] for i in range(num_counties)}
         with open(neighbors_file, "r") as file:
             next(file)
             for line in file:
@@ -68,14 +77,16 @@ class DistrictPartitioner:
                 _, start, end = line.split()
                 start = int(start)
                 end = int(end)
-                self.edges[start].append(end)
-                self.edges[end].append(start)
+                edges[start].append(end)
+                edges[end].append(start)
 
         with open(distances_file, "r") as file:
             next(file)
             for i, line in enumerate(file):
                 for j, val in enumerate(line.split(",")[1:]):
-                    self.distances[i][j] = int(val)
+                    distances[i][j] = int(val)
+
+        return num_districts, edges, populations, distances
 
     def show_map(self) -> None:
         """
@@ -91,7 +102,7 @@ class DistrictPartitioner:
         counties_gdf["district"] = -1
 
         districts = self._get_district_counties()
-        for district, counties in enumerate(districts):
+        for district, counties in districts.items():
             for county in counties:
                 counties_gdf.loc[counties_gdf["county_id"] == county, "district"] = district
 
@@ -106,9 +117,9 @@ class DistrictPartitioner:
             cmap=color_map,
         )
 
-        district_pop = [sum(self.population[j] for j in district) for district in districts]
+        district_pop = [sum(self.populations[j] for j in d) for d in districts.values()]
         district_dist = [
-            sum(self.distances[i][j] for i in district for j in district) for district in districts
+            sum(self.distances[i][j] for i in d for j in d if i != j) for d in districts.values()
         ]
         legend_elements = [
             Patch(
@@ -149,7 +160,17 @@ class OptimalPartitioner(DistrictPartitioner):
     SLACK_DYNAMIC = "dynamic"
     SLACK_TYPES = [SLACK_FIXED, SLACK_VARIABLE, SLACK_DYNAMIC]
 
-    def __init__(self, state: str, alpha: float, slack_type="var", slack_value=None) -> None:
+    def __init__(
+        self,
+        state: str,
+        K: int,
+        G: Dict[int, List],
+        P: List[int],
+        D: Dict[Tuple[int, int], int],
+        alpha: float,
+        slack_type=SLACK_DYNAMIC,
+        slack_value=0.05,
+    ) -> None:
         """
         Initialize optimal partitioner.
 
@@ -159,12 +180,23 @@ class OptimalPartitioner(DistrictPartitioner):
         @param slack_value: Value of slack to use (irrelevant in case of slack_type="var")
         """
 
-        super().__init__(state)
+        super().__init__(state, K, G, P, D)
         self.alpha = alpha
         self.slack_type = slack_type
         self.slack_value = slack_value
         self.avg_population = self.total_population / self.num_districts
         self._create_model()
+
+    def from_files(
+        state: str, alpha: float, slack_type: str, slack_value: float
+    ) -> "OptimalPartitioner":
+        """
+        Initialize optimal partitioner from files
+        """
+
+        return OptimalPartitioner(
+            state, *OptimalPartitioner._read_files(state), alpha, slack_type, slack_value
+        )
 
     def _create_model(self) -> None:
         """
@@ -200,8 +232,8 @@ class OptimalPartitioner(DistrictPartitioner):
             self.slack = [
                 (
                     self.slack_value
-                    if self.population[i] < self.avg_population
-                    else self.population[i] / self.avg_population - 1 + self.slack_value
+                    if self.populations[i] < self.avg_population
+                    else self.populations[i] / self.avg_population - 1 + self.slack_value
                 )
                 for i in range(self.num_counties)
             ]
@@ -235,12 +267,12 @@ class OptimalPartitioner(DistrictPartitioner):
         for i in range(self.num_counties):
             # Population greater than lower bound
             self.model.addConstr(
-                gp.quicksum(self.x[i, j] * self.population[j] for j in range(self.num_counties))
+                gp.quicksum(self.x[i, j] * self.populations[j] for j in range(self.num_counties))
                 >= self.avg_population * self.x[i, i] * (1 - self.slack[i])
             )
             # Population less than upper bound
             self.model.addConstr(
-                gp.quicksum(self.x[i, j] * self.population[j] for j in range(self.num_counties))
+                gp.quicksum(self.x[i, j] * self.populations[j] for j in range(self.num_counties))
                 <= self.avg_population * self.x[i, i] * (1 + self.slack[i])
             )
 
@@ -339,12 +371,12 @@ class OptimalPartitioner(DistrictPartitioner):
         else:
             print("No solution")
 
-    def _get_district_counties(self) -> List[Dict]:
-        return [
-            [j for j in range(self.num_counties) if self.x[i, j].X > 0.5]
+    def _get_district_counties(self) -> Dict[int, List[int]]:
+        return {
+            i: [j for j in range(self.num_counties) if self.x[i, j].X > 0.5]
             for i in range(self.num_counties)
             if self.x[i, i].X > 0.5
-        ]
+        }
 
 
 # ---------------------------------------------------#
@@ -367,7 +399,7 @@ class MetisPartitioner(DistrictPartitioner):
         xadj = [i for i in range(0, n * (n - 1), n - 1)]
         adjncy = [j for i in range(n) for j in range(n) if i != j]
         eweights = [self.distances[i][j] for i in range(n) for j in range(n) if i != j]
-        vweights = self.population
+        vweights = self.populations
         contiguous = True
 
         (edgecuts, part) = metis.part_graph(
@@ -430,3 +462,85 @@ class SwamyPartitioner(DistrictPartitioner):
         """
 
         super().__init__()
+
+    def _solve_exact(
+        self, G: Dict[int, List], P: List[int], D: Dict[Tuple[int, int], int], slack: float
+    ):
+        """
+        Solve districting problem on coarsened graph using exact methods
+        """
+
+        partitioner = OptimalPartitioner(self.state, self.num_districts, G, P, D)
+        partitioner.optimize()
+
+        partitions = {}
+        i = 0
+        for partition in partitioner._get_district_counties().values():
+            if len(partition) > 0:
+                partitions[i] = partition
+                i += 1
+
+        return partitions
+
+    def _optimize(
+        self,
+        G: Dict[int, List],
+        P: List[int],
+        D: Dict[Tuple[int, int], int],
+        size_limit: int,
+        slack: float,
+    ) -> Dict[int, List]:
+        if len(P) * self.num_districts > size_limit:
+            # Find maximal matching (heuristic)
+            P_edges = sorted([(P[i] + P[j], i, j) for i in G for j in G[i]])
+
+            matching = {}
+            for _, i, j in P_edges:
+                if i not in matching and j not in matching:
+                    matching[i] = j
+                    matching[j] = i
+
+            # Merge nodes in matching
+            new_G = {}
+            new_P = []
+            new_D = {}
+            for i in range(len(P)):
+                if i not in matching:
+                    new_G[i] = G[i].copy()
+                    new_P.append(P[i])
+                    for j in G:
+                        if (i, j) in D:
+                            new_D[j, i] = new_D[i, j] = D[i, j]
+                else:
+                    j = matching[i]
+                    new_G[i] = list(set(G[i]) | set(G[j]))
+                    new_P[i] = P[i] + P[j]
+                    for k in G:
+                        if (i, k) in D and (j, k) in D and k != i and k != j:
+                            # Improve
+                            new_D[i, k] = new_D[k, i] = (D[i, k] + D[j, k]) / 2
+
+            sub_partitions = self._optimize(new_G, new_P, new_D, size_limit, slack)
+            partitions = {i: [] for i in range(self.num_districts)}
+
+            # Unmerge nodes
+            for i, partition in sub_partitions.items():
+                for j in partition:
+                    partitions[i].append(j)
+                    if j in matching:
+                        partitions[i].append(matching[j])
+
+            # Local optimization
+            return self._local_optimize(G, P, D, partitions)
+        else:
+            return self._solve_exact(G, P, D, slack)
+
+    def optimize(self, size_limit=50, slack=0.02):
+        """
+        Optimize partitioning using Swamy et al. (2022)
+        """
+
+        return self._optimize(self.edges, self.population, size_limit, slack)
+        # coarse_graph = self._coarsen_graph()
+        # coarse_partitioner = OptimalPartitioner(coarse_graph)
+        # return self.unmerge(coarse_partitioner.optimize(), size_limit, slack)
