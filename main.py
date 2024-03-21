@@ -18,17 +18,28 @@ if __name__ == "__main__":
     parser.add_argument(
         "-v", "--verbose", type=bool, default=False, help="Print solution"
     )
+    parser.add_argument(
+        "-l",
+        "--slack_value",
+        type=float,
+        default=2.0,
+        help="Starting slack value for fixed and dynamic solution types",
+    )
+    parser.add_argument(
+        "-g", "--gap", type=float, default=0.0, help="Gap for optimal partitioner"
+    )
 
     args = parser.parse_args()
 
     if args.type == "metis":
         dp = MetisPartitioner(args.state)
-    else:
+    elif args.type in ["fixed", "dynamic", "var", "optimal"]:
+        slack_type = args.type if args.type in ["fixed", "dynamic"] else "var"
         dp = OptimalPartitioner(
-            args.state, args.alpha, slack_type="dynamic", slack_value=0.35
+            args.state, args.alpha, slack_type=slack_type, slack_value=args.slack_value
         )
+        dp.optimize(gap=args.gap, slack_step=0.1)
 
-    dp.optimize(gap=0, slack_step=0.1)
     if args.verbose:
         dp.print_solution()
     if args.map:

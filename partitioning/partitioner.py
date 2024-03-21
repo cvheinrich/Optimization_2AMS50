@@ -3,6 +3,7 @@ from typing import List, Dict
 
 import gurobipy as gp
 from gurobipy import GRB
+from matplotlib.patches import Patch
 import pymetis as metis
 import geopandas as gpd
 import networkx as nx
@@ -79,8 +80,6 @@ class DistrictPartitioner:
     def show_map(self) -> None:
         """
         Show map of counties with districts colored
-
-        TODO: Add population data to map
         """
 
         shape_file = os.path.join(
@@ -91,22 +90,49 @@ class DistrictPartitioner:
         counties_gdf["county_id"] = range(len(counties_gdf))
         counties_gdf["district"] = -1
 
-        for district, counties in enumerate(self._get_district_counties()):
+        districts = self._get_district_counties()
+        for district, counties in enumerate(districts):
             for county in counties:
                 counties_gdf.loc[counties_gdf["county_id"] == county, "district"] = (
                     district
                 )
 
-        import matplotlib.pyplot as plt
+        color_map = plt.get_cmap("tab20", self.num_districts)
 
         fig, ax = plt.subplots(figsize=(10, 10))
         counties_gdf.plot(
             column="district",
             ax=ax,
-            legend=True,
             categorical=True,
-            legend_kwds={"title": "District"},
+            legend=False,
+            cmap=color_map,
         )
+
+        district_pop = [
+            sum(self.population[j] for j in district) for district in districts
+        ]
+        district_dist = [
+            sum(self.distances[i][j] for i in district for j in district)
+            for district in districts
+        ]
+        legend_elements = [
+            Patch(
+                facecolor=color_map(district / self.num_districts),
+                # edgecolor="k",
+                label="Pop. {:,.0f}\nDist. {:,.0f}".format(
+                    district_pop[district], district_dist[district]
+                ),
+            )
+            for district in range(len(districts))
+        ]
+        ax.legend(
+            handles=legend_elements,
+            title="District Information",
+            loc="upper left",
+            bbox_to_anchor=(1, 1),
+        )
+
+        plt.tight_layout()
         plt.show()
 
     def optimize(self):
@@ -328,15 +354,17 @@ class OptimalPartitioner(DistrictPartitioner):
                     for k in range(j + 1, self.num_counties):
                         if self.y[i, j, k].X != 0:
                             print(f"y_{i}_{k}_{j} = {self.y[i, j, k].X}")
-            for j in range(self.num_districts):
-                print("slack_{} = {}".format(j, self.slack[j].X))
+            if self.slack_type == OptimalPartitioner.SLACK_VARIABLE:
+                for j in range(self.num_districts):
+                    print("slack_{} = {}".format(j, self.slack[j].X))
         else:
             print("No solution")
 
     def _get_district_counties(self) -> List[Dict]:
         return [
-            {j for j in range(self.num_counties) if self.x[i, j].X > 0.5}
+            [j for j in range(self.num_counties) if self.x[i, j].X > 0.5]
             for i in range(self.num_counties)
+            if self.x[i, i].X > 0.5
         ]
 
 
