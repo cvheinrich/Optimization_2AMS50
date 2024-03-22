@@ -49,6 +49,7 @@ class HeuristicPartitioner(DistrictPartitioner):
         G: Dict[int, List[int]],
         P: List[int],
         D: List[List[int]],
+        max_iter: int = 500,
         slack_value: float = 0.05,
     ):
         """
@@ -56,14 +57,19 @@ class HeuristicPartitioner(DistrictPartitioner):
         """
 
         super().__init__(state, K, G, P, D)
+        self.max_iter = max_iter
         self.slack = slack_value
 
-    def from_files(state: str, slack_value: float = 0.05) -> "HeuristicPartitioner":
+    def from_files(
+        state: str, max_iter: int = 500, slack_value: float = 0.05
+    ) -> "HeuristicPartitioner":
         """
         Initialize partitioner from files
         """
 
-        return HeuristicPartitioner(state, *DistrictPartitioner._read_files(state), slack_value)
+        return HeuristicPartitioner(
+            state, *DistrictPartitioner._read_files(state), max_iter, slack_value
+        )
 
     def _solve_exact(self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int]):
         """
@@ -110,6 +116,51 @@ class HeuristicPartitioner(DistrictPartitioner):
         """
         Local optimization heuristic
         """
+        node_partitions = {node: k for k, partition in partitions.items() for node in partition}
+        compactness_decrease = lambda node, partition: (
+            sum(D[node, i] for i in partitions[partition])
+            - sum(D[node, i] for i in partitions[node_partitions[node]] if i != node)
+        )
+        # key: (node, partition), value: (compactness decrease, number of neighbors in partition)
+        border_nodes: Dict[Tuple[int, int], Tuple[int, int]] = {}
+
+        def add_to_border(node, partition):
+            if (node, partition) not in border_nodes:
+                border_nodes[node, partition] = (compactness_decrease(node, partition), 1)
+            else:
+                increase, count = border_nodes[node, partition]
+                border_nodes[node, partition] = (increase, count + 1)
+
+        for i in G:
+            part_i = node_partitions[i]
+            for j in G[i]:
+                part_j = node_partitions[j]
+                if part_i != part_j:
+                    add_to_border(i, part_j)
+
+        for _ in range(self.max_iter):
+            i, new_part = min(border_nodes, key=lambda x: border_nodes[x])
+            if border_nodes[i, new_part][0] >= 0:
+                break
+
+            prev_part = node_partitions[i]
+            partitions[prev_part].remove(i)
+            partitions[new_part].append(i)
+            node_partitions[i] = new_part
+            del border_nodes[i, new_part]
+
+            for j in G[i]:
+                part_j = node_partitions[j]
+                if new_part != part_j:
+                    add_to_border(i, part_j)
+                    add_to_border(j, new_part)
+                else:
+                    increase, count = border_nodes[j, prev_part]
+                    if count == 1:
+                        del border_nodes[j, prev_part]
+                    else:
+                        border_nodes[j, prev_part] = (increase, count - 1)
+
         return partitions
 
     def _optimize(
@@ -141,7 +192,7 @@ class HeuristicPartitioner(DistrictPartitioner):
 
             for i in new_G:
                 neighbor_set = set(G[i]) if i not in matching else set(G[i]) | set(G[matching[i]])
-                new_G[i] = list({map_to_match(j) for j in neighbor_set})
+                new_G[i] = [k for k in {map_to_match(j) for j in neighbor_set} if k != i]
 
                 distances = (
                     {j: D[i, j] for j in G if i != j}

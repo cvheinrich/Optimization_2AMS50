@@ -37,7 +37,7 @@ if __name__ == "__main__":
         )
         dp.optimize(gap=args.gap, slack_step=0.1)
     elif p_type == "swamy_h":
-        dp = HeuristicPartitioner.from_files(args.state, slack_value=args.slack_value)
+        dp = HeuristicPartitioner.from_files(args.state, 10000, slack_value=args.slack_value)
         dp.optimize()
 
     if args.verbose:
