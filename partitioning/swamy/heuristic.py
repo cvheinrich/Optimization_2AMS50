@@ -41,7 +41,7 @@ class HeuristicPartitioner(BSP):
             alpha,
             slack_type,
             slack_value,
-            max_iter
+            max_iter,
         )
 
     def _solve_exact(
@@ -297,4 +297,13 @@ class HeuristicPartitioner(BSP):
         return self.partitions
 
     def print_solution(self) -> Dict[int, List[int]]:
-        print(self.partitions)
+        for i, partition in self.partitions.items():
+            population = sum(self.populations[j] for j in partition)
+            distance = sum(self.distances[j][k] for j in partition for k in partition if j != k) / 2
+            value = distance + self.C * self.alpha * abs(population - self.avg_population)
+
+            print(f"District {i}:")
+            print(partition)
+            print(f"Population: {population}")
+            print(f"Distance: {distance}")
+            print(f"Value: {value}")

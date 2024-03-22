@@ -124,6 +124,7 @@ class DistrictPartitioner:
         district_dist = [
             sum(self.distances[i][j] for i in d for j in d if i != j) for d in districts.values()
         ]
+
         legend_elements = [
             Patch(
                 facecolor=colors[k],
