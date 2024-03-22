@@ -76,8 +76,8 @@ class OptimalPartitioner(BSP):
             self.slack = [self.slack_value for _ in range(self.num_counties)]
 
         self.model.setObjective(
-            # Minimize within-district distances
             (
+                # Minimize within-district distances, i.e. spread
                 gp.quicksum(
                     self.y[i, j, k] * self.distances[i][k]
                     for i in range(self.num_counties)
@@ -85,7 +85,8 @@ class OptimalPartitioner(BSP):
                     for k in range(j + 1, self.num_counties)
                 )
                 # Minimize population imbalance
-                + self.alpha
+                + self.C
+                * self.alpha
                 * self.avg_population
                 * gp.quicksum(self.slack[j] for j in range(self.num_counties))
             ),

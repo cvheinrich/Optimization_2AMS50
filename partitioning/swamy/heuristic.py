@@ -48,7 +48,7 @@ class HeuristicPartitioner(BSP):
         self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int], gap: float = 0.0
     ):
         """
-        Solve districting problem on coarsened graph using exact methods
+        Solve districting problem on coarsened graph using exact method
         """
         ind_map = dict(zip(P.keys(), list(range(len(P)))))
 
@@ -102,7 +102,7 @@ class HeuristicPartitioner(BSP):
         while stack:
             node = stack.pop()
             for neighbor in G[node]:
-                if neighbor not in visited:
+                if neighbor in part_nodes and neighbor not in visited:
                     visited.add(neighbor)
                     stack.append(neighbor)
 
@@ -120,17 +120,34 @@ class HeuristicPartitioner(BSP):
         """
         node_partitions = {node: k for k, partition in partitions.items() for node in partition}
 
-        def compactness_decrease(node: int, partition: int) -> int:
-            dists_in_new = sum(D[node, i] for i in partitions[partition])
-            dists_in_prev = sum(D[node, i] for i in partitions[node_partitions[node]] if i != node)
-            return dists_in_new - dists_in_prev
+        def cost_increase(node: int, part_B: int) -> int:
+            part_A = node_partitions[node]
 
-        # key: (node, partition), value: (compactness decrease, number of neighbors in partition)
+            dists_in_new = sum(D[node, i] for i in partitions[part_B])
+            dists_in_prev = sum(D[node, i] for i in partitions[part_A] if i != node)
+
+            pop_A = sum(P[i] for i in partitions[part_A])
+            pop_B = sum(P[i] for i in partitions[part_B])
+
+            return (
+                dists_in_new
+                - dists_in_prev
+                + self.C
+                * self.alpha
+                * (
+                    abs(pop_A - P[node] - self.avg_population)
+                    + abs(pop_B + P[node] - self.avg_population)
+                    - abs(pop_A - self.avg_population)
+                    - abs(pop_B - self.avg_population)
+                )
+            )
+
+        # key: (node, partition), value: (cost increase, number of neighbors in partition)
         border_nodes: Dict[Tuple[int, int], Tuple[int, int]] = {}
 
         def add_to_border(node, partition):
             if (node, partition) not in border_nodes:
-                border_nodes[node, partition] = (compactness_decrease(node, partition), 1)
+                border_nodes[node, partition] = (cost_increase(node, partition), 1)
             else:
                 increase, count = border_nodes[node, partition]
                 border_nodes[node, partition] = (increase, count + 1)
@@ -142,27 +159,34 @@ class HeuristicPartitioner(BSP):
                 if part_i != part_j:
                     add_to_border(i, part_j)
 
+        skip = 0
         for _ in range(self.max_iter):
-            i, new_part = min(border_nodes, key=lambda x: border_nodes[x])
-            if border_nodes[i, new_part][0] >= 0:
+            if skip == 0:
+                sorted_border_nodes = sorted(border_nodes.items(), key=lambda x: x[1][0])
+            i, new_part = sorted_border_nodes[skip][0]
+            if sorted_border_nodes[skip][1][0] >= 0:
                 break
 
             prev_part = node_partitions[i]
             partitions[prev_part].remove(i)
-            if not self._is_connected(partitions[prev_part], G) or not self._is_balanced(
-                partitions[prev_part], partitions[new_part], P
-            ):
+            # if not self._is_connected(partitions[prev_part], G) or not self._is_balanced(
+            #     partitions[prev_part], partitions[new_part], P
+            # ):
+            if not self._is_connected(partitions[prev_part], G):
                 partitions[prev_part].append(i)
+                skip += 1
                 continue
+
             partitions[new_part].append(i)
             node_partitions[i] = new_part
             del border_nodes[i, new_part]
+            skip = 0
 
             for node, part in border_nodes:
                 node_part = node_partitions[node]
                 if node_part in [prev_part, new_part] or part in [prev_part, new_part]:
                     decrease, count = border_nodes[node, part]
-                    border_nodes[node, part] = (compactness_decrease(node, part), count)
+                    border_nodes[node, part] = (cost_increase(node, part), count)
 
             for j in G[i]:
                 part_j = node_partitions[j]
@@ -231,7 +255,7 @@ class HeuristicPartitioner(BSP):
                     if j not in matching:
                         new_D[i, j] = new_D[j, i] = distances[j]
                     elif j < matching[j]:
-                        new_D[i, j] = new_D[j, i] = (distances[j] + distances[matching[j]]) / 2
+                        new_D[i, j] = new_D[j, i] = distances[j] + distances[matching[j]] / 2
 
             sub_partitions = self._optimize(new_G, new_P, new_D, size_limit, gap)
             partitions = {i: [] for i in sub_partitions}

@@ -6,7 +6,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
     SLACK_FIXED = "fixed"
     SLACK_VARIABLE = "var"
     SLACK_TYPES = [SLACK_FIXED, SLACK_VARIABLE]
-    SLACK_DEFAULT = SLACK_FIXED
+    SLACK_DEFAULT = SLACK_VARIABLE
 
     ALPHA_DEFAULT = 1.0
     SLACK_VALUE_DEFAULT = 0.025
@@ -29,6 +29,15 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         self.alpha = alpha
         self.slack_type = slack_type
         self.slack_value = slack_value
+        # With alpha = 1.0 compactness and population balance should be equally important
+        # In the case when all counties are in one district:
+        #  - population imbalance is (K-1) / K * total_population
+        #  - spread is the sum of all distances
+        # Based on this C = K / (K-1) * sum(distances) / total_population
+        self.C = (
+            K / (K - 1) * sum(sum(row[i + 1 :]) for i, row in enumerate(D)) / self.total_population
+        )
+        print(f"C = {self.C}")
 
     def from_files(
         state: str,
