@@ -99,19 +99,24 @@ class DistrictPartitioner:
         counties_gdf["district"] = -1
 
         districts = self._get_district_counties()
+        ind_map = dict(zip(districts.keys(), range(len(districts))))
+        districts = {ind_map[k]: v for k, v in districts.items()}
+
         for district, counties in districts.items():
             for county in counties:
                 counties_gdf.loc[counties_gdf["county_id"] == county, "district"] = district
 
         color_map = plt.get_cmap("tab20", self.num_districts)
+        colors = [color_map(i) for i in range(self.num_districts)]
 
         fig, ax = plt.subplots(figsize=(10, 10))
+        counties_gdf["color"] = counties_gdf["district"].apply(lambda x: colors[x])
         counties_gdf.plot(
             column="district",
             ax=ax,
             categorical=True,
             legend=False,
-            cmap=color_map,
+            color=counties_gdf["color"],
         )
 
         district_pop = [sum(self.populations[j] for j in d) for d in districts.values()]
@@ -120,13 +125,11 @@ class DistrictPartitioner:
         ]
         legend_elements = [
             Patch(
-                facecolor=color_map(district / self.num_districts),
-                # edgecolor="k",
-                label="Pop. {:,.0f}\nDist. {:,.0f}".format(
-                    district_pop[district], district_dist[district]
-                ),
+                facecolor=colors[k],
+                edgecolor="k",
+                label="Pop. {:,.0f}\nDist. {:,.0f}".format(district_pop[k], district_dist[k]),
             )
-            for district in range(len(districts))
+            for k in districts
         ]
         ax.legend(
             handles=legend_elements,
@@ -144,5 +147,5 @@ class DistrictPartitioner:
     def print_solution(self):
         raise NotImplementedError
 
-    def _get_district_counties(self):
+    def _get_district_counties(self) -> Dict[int, List[int]]:
         raise NotImplementedError

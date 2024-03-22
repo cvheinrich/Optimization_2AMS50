@@ -89,11 +89,13 @@ class HeuristicPartitioner(DistrictPartitioner):
         )
         partitioner.optimize()
 
+        rev_map = {v: k for k, v in ind_map.items()}
+
         partitions = {}
         i = 0
         for partition in partitioner._get_district_counties().values():
             if len(partition) > 0:
-                partitions[i] = partition
+                partitions[rev_map[i]] = [rev_map[j] for j in partition]
                 i += 1
 
         return partitions
@@ -158,7 +160,7 @@ class HeuristicPartitioner(DistrictPartitioner):
                         new_D[i, j] = new_D[j, i] = (distances[j] + distances[matching[j]]) / 2
 
             sub_partitions = self._optimize(new_G, new_P, new_D, size_limit)
-            partitions = {i: [] for i in range(self.num_districts)}
+            partitions = {i: [] for i in sub_partitions}
 
             # Unmerge nodes
             for i, partition in sub_partitions.items():
@@ -190,5 +192,5 @@ class HeuristicPartitioner(DistrictPartitioner):
     def _get_district_counties(self) -> Dict[int, List[int]]:
         return self.partitions
 
-    def print_solution(self):
+    def print_solution(self) -> Dict[int, List[int]]:
         print(self.partitions)
