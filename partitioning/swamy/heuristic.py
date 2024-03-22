@@ -57,6 +57,7 @@ class HeuristicPartitioner(DistrictPartitioner):
         """
 
         super().__init__(state, K, G, P, D)
+        self.avg_population = self.total_population / K
         self.max_iter = max_iter
         self.slack = slack_value
 
@@ -91,9 +92,11 @@ class HeuristicPartitioner(DistrictPartitioner):
             edges,
             populations,
             distances,
-            slack_type=OptimalPartitioner.SLACK_VARIABLE,
+            slack_type=OptimalPartitioner.SLACK_DYNAMIC,
         )
         partitioner.optimize()
+
+        self.slack_value = partitioner.slack_value
 
         rev_map = {v: k for k, v in ind_map.items()}
 
@@ -106,9 +109,32 @@ class HeuristicPartitioner(DistrictPartitioner):
 
         return partitions
 
+    def _is_balanced(
+        self, prev_part_nodes: List[int], new_part_nodes: List[int], P: Dict[int, int]
+    ) -> bool:
+        return (
+            abs(sum(P[i] for i in prev_part_nodes) - self.avg_population) < self.slack
+            and abs(sum(P[i] for i in new_part_nodes) - self.avg_population) < self.slack
+        )
+
+    def _is_connected(self, part_nodes: List[int], G: Dict[int, List[int]]) -> bool:
+        """
+        Check if the partition is connected
+        """
+        visited = {part_nodes[0]}
+        stack = [part_nodes[0]]
+        while stack:
+            node = stack.pop()
+            for neighbor in G[node]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    stack.append(neighbor)
+
+        return len(visited) == len(part_nodes)
+
     def _local_optimize(
         self,
-        G: Dict[int, List],
+        G: Dict[int, List[int]],
         P: Dict[int, int],
         D: Dict[Tuple[int, int], int],
         partitions: Dict[int, List[int]],
@@ -117,10 +143,12 @@ class HeuristicPartitioner(DistrictPartitioner):
         Local optimization heuristic
         """
         node_partitions = {node: k for k, partition in partitions.items() for node in partition}
-        compactness_decrease = lambda node, partition: (
-            sum(D[node, i] for i in partitions[partition])
-            - sum(D[node, i] for i in partitions[node_partitions[node]] if i != node)
-        )
+
+        def compactness_decrease(node: int, partition: int) -> int:
+            dists_in_new = sum(D[node, i] for i in partitions[partition])
+            dists_in_prev = sum(D[node, i] for i in partitions[node_partitions[node]] if i != node)
+            return dists_in_new - dists_in_prev
+
         # key: (node, partition), value: (compactness decrease, number of neighbors in partition)
         border_nodes: Dict[Tuple[int, int], Tuple[int, int]] = {}
 
@@ -145,9 +173,20 @@ class HeuristicPartitioner(DistrictPartitioner):
 
             prev_part = node_partitions[i]
             partitions[prev_part].remove(i)
+            if not self._is_connected(partitions[prev_part], G) or not self._is_balanced(
+                partitions[prev_part], partitions[new_part], P
+            ):
+                partitions[prev_part].append(i)
+                continue
             partitions[new_part].append(i)
             node_partitions[i] = new_part
             del border_nodes[i, new_part]
+
+            for node, part in border_nodes:
+                node_part = node_partitions[node]
+                if node_part in [prev_part, new_part] or part in [prev_part, new_part]:
+                    decrease, count = border_nodes[node, part]
+                    border_nodes[node, part] = (compactness_decrease(node, part), count)
 
             for j in G[i]:
                 part_j = node_partitions[j]
@@ -155,11 +194,11 @@ class HeuristicPartitioner(DistrictPartitioner):
                     add_to_border(i, part_j)
                     add_to_border(j, new_part)
                 else:
-                    increase, count = border_nodes[j, prev_part]
+                    decrease, count = border_nodes[j, prev_part]
                     if count == 1:
                         del border_nodes[j, prev_part]
                     else:
-                        border_nodes[j, prev_part] = (increase, count - 1)
+                        border_nodes[j, prev_part] = (decrease, count - 1)
 
         return partitions
 
@@ -171,10 +210,13 @@ class HeuristicPartitioner(DistrictPartitioner):
             P_edges = sorted([(P[i] + P[j], i, j) for i in G for j in G[i] if i < j])
 
             matching = {}
+            max_num_matching = 2 * (len(P) - size_limit)
             for _, i, j in P_edges:
                 if i not in matching and j not in matching:
                     matching[i] = j
                     matching[j] = i
+                if len(matching) >= max_num_matching:
+                    break
 
             # Merge nodes in matching
             new_G = {}
