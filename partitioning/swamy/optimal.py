@@ -1,16 +1,11 @@
 from typing import Dict, List, Tuple
-from partitioning.base import DistrictPartitioner
+from partitioning.swamy.base import BaseSwamyPartitioner as BSP
 
 import gurobipy as gp
 from gurobipy import GRB
 
 
-class OptimalPartitioner(DistrictPartitioner):
-    SLACK_FIXED = "fixed"
-    SLACK_VARIABLE = "var"
-    SLACK_DYNAMIC = "dynamic"
-    SLACK_TYPES = [SLACK_FIXED, SLACK_VARIABLE, SLACK_DYNAMIC]
-
+class OptimalPartitioner(BSP):
     def __init__(
         self,
         state: str,
@@ -18,9 +13,9 @@ class OptimalPartitioner(DistrictPartitioner):
         G: Dict[int, List],
         P: List[int],
         D: List[List[int]],
-        alpha: float = 1.0,
-        slack_type: str = SLACK_DYNAMIC,
-        slack_value: float = 0.05,
+        alpha: float = BSP.ALPHA_DEFAULT,
+        slack_type: str = BSP.SLACK_DEFAULT,
+        slack_value: float = BSP.SLACK_VALUE_DEFAULT,
     ) -> None:
         """
         Initialize optimal partitioner.
@@ -30,16 +25,14 @@ class OptimalPartitioner(DistrictPartitioner):
         @param slack_type: Type of slack to use: "fixed", "var", or "dynamic"
         @param slack_value: Value of slack to use (irrelevant in case of slack_type="var")
         """
-
-        super().__init__(state, K, G, P, D)
-        self.alpha = alpha
-        self.slack_type = slack_type
-        self.slack_value = slack_value
-        self.avg_population = self.total_population / self.num_districts
+        super().__init__(state, K, G, P, D, alpha, slack_type, slack_value)
         self._create_model()
 
     def from_files(
-        state: str, alpha: float = 1.0, slack_type: str = SLACK_DYNAMIC, slack_value: float = 0.05
+        state: str,
+        alpha: float = BSP.ALPHA_DEFAULT,
+        slack_type: str = BSP.SLACK_DEFAULT,
+        slack_value: float = BSP.SLACK_VALUE_DEFAULT,
     ) -> "OptimalPartitioner":
         """
         Initialize optimal partitioner from files
@@ -75,20 +68,11 @@ class OptimalPartitioner(DistrictPartitioner):
             for k in self.edges[j]
         }
 
-        if self.slack_type == OptimalPartitioner.SLACK_VARIABLE:
+        if self.slack_type == BSP.SLACK_VARIABLE:
             self.slack = [
                 self.model.addVar(vtype=gp.GRB.CONTINUOUS) for _ in range(self.num_counties)
             ]
-        elif self.slack_type == OptimalPartitioner.SLACK_DYNAMIC:
-            self.slack = [
-                (
-                    self.slack_value
-                    if self.populations[i] < self.avg_population
-                    else self.populations[i] / self.avg_population - 1 + self.slack_value
-                )
-                for i in range(self.num_counties)
-            ]
-        else:  # fixed
+        else:  # BSP.SLACK_FIXED
             self.slack = [self.slack_value for _ in range(self.num_counties)]
 
         self.model.setObjective(
@@ -174,9 +158,10 @@ class OptimalPartitioner(DistrictPartitioner):
         self.slack_value = slack_value
         self._create_model()
 
-    def optimize(self, gap=0, slack_step=0.1) -> gp.Model:
+    def optimize(self, gap=0, slack_step=0.001) -> gp.Model:
         """
         Optimize model.
+        TODO: add large node isolation
 
         @param gap: MIP gap
         @param slack_step: Step size for increasing slack_value in case of infeasible model
@@ -184,10 +169,7 @@ class OptimalPartitioner(DistrictPartitioner):
         self.model.Params.MIPGap = gap
         self.model.optimize()
 
-        if (
-            self.slack_type in [OptimalPartitioner.SLACK_FIXED, OptimalPartitioner.SLACK_DYNAMIC]
-            and slack_step > 0
-        ):
+        if self.slack_type == BSP.SLACK_FIXED and slack_step > 0:
             print("Increasing slack until feasible model is found. Set slack_step=0 to disable.")
             while self.model.status != GRB.OPTIMAL:
                 self.slack_value += slack_step
@@ -216,7 +198,7 @@ class OptimalPartitioner(DistrictPartitioner):
                     for k in range(j + 1, self.num_counties):
                         if self.y[i, j, k].X != 0:
                             print(f"y_{i}_{k}_{j} = {self.y[i, j, k].X}")
-            if self.slack_type == OptimalPartitioner.SLACK_VARIABLE:
+            if self.slack_type == BSP.SLACK_VARIABLE:
                 for j in range(self.num_districts):
                     print("slack_{} = {}".format(j, self.slack[j].X))
         else:

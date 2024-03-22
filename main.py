@@ -1,44 +1,53 @@
 import argparse
-from partitioning.swamy.optimal import OptimalPartitioner as OP
+from partitioning.swamy.base import BaseSwamyPartitioner as BSP
+from partitioning.swamy.optimal import OptimalPartitioner
 from partitioning.swamy.heuristic import HeuristicPartitioner
 from partitioning.metis import MetisPartitioner
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Districting")
     parser.add_argument("-s", "--state", default="RI", help="State to district")
-    parser.add_argument("-t", "--type", default="optimal", help="Type of partitioner")
+    parser.add_argument("-m", "--method", default="swamy_h", help="Partitioner to use")
     parser.add_argument(
         "-a",
         "--alpha",
         type=float,
-        default=1.0,
+        default=BSP.ALPHA_DEFAULT,
         help="Alpha value for optimal partitioner",
     )
-    parser.add_argument("-m", "--map", type=bool, default=False, help="Show map of districts")
-    parser.add_argument("-v", "--verbose", type=bool, default=False, help="Print solution")
+    parser.add_argument("--map", type=bool, default=True, help="Show map of districts")
+    parser.add_argument("--verbose", type=bool, default=True, help="Print solution")
     parser.add_argument(
-        "-l",
+        "-t",
+        "--slack_type",
+        type=str,
+        default=BSP.SLACK_DEFAULT,
+        help="Starting slack value for fixed and dynamic solution types",
+    )
+    parser.add_argument(
+        "-v",
         "--slack_value",
         type=float,
-        default=2.0,
+        default=BSP.SLACK_VALUE_DEFAULT,
         help="Starting slack value for fixed and dynamic solution types",
     )
     parser.add_argument("-g", "--gap", type=float, default=0.0, help="Gap for optimal partitioner")
 
     args = parser.parse_args()
-    p_type = args.type
+    p_method = args.method
 
-    if p_type == "metis":
+    if p_method == "metis":
         dp = MetisPartitioner(args.state)
-    elif p_type in OP.SLACK_TYPES + ["optimal"]:
-        slack_type = p_type if p_type in [OP.SLACK_FIXED, OP.SLACK_DYNAMIC] else OP.SLACK_VARIABLE
-        dp = OP.from_files(
-            args.state, args.alpha, slack_type=slack_type, slack_value=args.slack_value
+    elif p_method in ["swamy_o", "optimal"]:
+        dp = BSP.from_files(
+            args.state, args.alpha, slack_type=args.slack_type, slack_value=args.slack_value
         )
-        dp.optimize(gap=args.gap, slack_step=0.1)
-    elif p_type == "swamy_h":
-        dp = HeuristicPartitioner.from_files(args.state, 10000, slack_value=args.slack_value)
-        dp.optimize()
+        dp.optimize(gap=args.gap)
+    elif p_method in ["swamy_h", "heuristic"]:
+        dp = HeuristicPartitioner.from_files(
+            args.state, args.alpha, args.slack_type, args.slack_value, 1000
+        )
+        dp.optimize(gap=args.gap)
 
     if args.verbose:
         dp.print_solution()

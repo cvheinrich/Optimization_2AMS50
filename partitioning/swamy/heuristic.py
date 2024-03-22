@@ -1,47 +1,10 @@
 from typing import Dict, List, Tuple
 
-from partitioning.base import DistrictPartitioner
+from partitioning.swamy.base import BaseSwamyPartitioner as BSP
 from partitioning.swamy.optimal import OptimalPartitioner
 
 
-class HeuristicPartitioner(DistrictPartitioner):
-    """
-    Steps of the partitioner as described in Swamy et al. (2022):
-    1. Coarsen the graph:
-        - Merge nodes until the graph is small enough to be solved by exact methods:
-            - This can be done by iteratively finding maximal matchings or a maximum matchings.
-            - To find compact maximum matchings:
-                - Sort neighbor edges by the sum of populations of the two endpoints (adding
-                the distance could also be considered)
-                - Iterate over edges in non-decreasing order, add the current edge to the matching
-                if it does not have an already included endpoint.
-            - Merged on edges in the matching
-    2. Solve districting problem on coarsened graph:
-        - The exact method in `OptimalPartitioner` can be used
-        - It is advantageous to start from an initial feasible solution:
-            - Select random node not in a district
-            - Attach random neighbor until the population exceeds the average
-            - Repeat until all nodes are in a district
-            - If K districts were found => done
-            - If more than K => merge districts (possibly with the smallest populations)
-            - If less than K => start over
-        - The initial solution can be improved by the method described in 3. Uncoarsening
-    3. Uncoarsen the graph:
-        - Unmerge nodes to previous level (i.e. first undo the last matching merge, then the second
-          to last, etc)
-        - Use local improvement heuristic to improve solution:
-            - The method used in the paper selects the county-neighboring district pair, that would
-              improve the compactness objective the most, if the county was to be reassigned to the
-              neighboring district.
-            - Local search can be terminated after a certain number of iterations or when no improvement
-              is found
-            - Potentially useful data structures:
-                - A data structure maintaining the list of counties neighboring other districts
-                - A data structure maintaining the contribution of each county to the compactness objective
-        - Repeat until the original graph is reached
-
-    """
-
+class HeuristicPartitioner(BSP):
     def __init__(
         self,
         state: str,
@@ -49,30 +12,41 @@ class HeuristicPartitioner(DistrictPartitioner):
         G: Dict[int, List[int]],
         P: List[int],
         D: List[List[int]],
+        alpha: float = BSP.ALPHA_DEFAULT,
+        slack_type: str = BSP.SLACK_DEFAULT,
+        slack_value: float = BSP.SLACK_VALUE_DEFAULT,
         max_iter: int = 500,
-        slack_value: float = 0.05,
     ):
         """
         Initialize Swamy partitioner
         """
 
-        super().__init__(state, K, G, P, D)
-        self.avg_population = self.total_population / K
+        super().__init__(state, K, G, P, D, alpha, slack_type, slack_value)
         self.max_iter = max_iter
-        self.slack = slack_value
 
     def from_files(
-        state: str, max_iter: int = 500, slack_value: float = 0.05
+        state: str,
+        alpha: float = BSP.ALPHA_DEFAULT,
+        slack_type: str = BSP.SLACK_TYPES,
+        slack_value: float = BSP.SLACK_VALUE_DEFAULT,
+        max_iter: int = 500,
     ) -> "HeuristicPartitioner":
         """
         Initialize partitioner from files
         """
 
         return HeuristicPartitioner(
-            state, *DistrictPartitioner._read_files(state), max_iter, slack_value
+            state,
+            *HeuristicPartitioner._read_files(state),
+            alpha,
+            slack_type,
+            slack_value,
+            max_iter
         )
 
-    def _solve_exact(self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int]):
+    def _solve_exact(
+        self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int], gap: float = 0.0
+    ):
         """
         Solve districting problem on coarsened graph using exact methods
         """
@@ -92,9 +66,11 @@ class HeuristicPartitioner(DistrictPartitioner):
             edges,
             populations,
             distances,
-            slack_type=OptimalPartitioner.SLACK_DYNAMIC,
+            self.alpha,
+            self.slack_type,
+            self.slack_value,
         )
-        partitioner.optimize()
+        partitioner.optimize(gap)
 
         self.slack_value = partitioner.slack_value
 
@@ -113,8 +89,8 @@ class HeuristicPartitioner(DistrictPartitioner):
         self, prev_part_nodes: List[int], new_part_nodes: List[int], P: Dict[int, int]
     ) -> bool:
         return (
-            abs(sum(P[i] for i in prev_part_nodes) - self.avg_population) < self.slack
-            and abs(sum(P[i] for i in new_part_nodes) - self.avg_population) < self.slack
+            abs(sum(P[i] for i in prev_part_nodes) - self.avg_population) < self.slack_value
+            and abs(sum(P[i] for i in new_part_nodes) - self.avg_population) < self.slack_value
         )
 
     def _is_connected(self, part_nodes: List[int], G: Dict[int, List[int]]) -> bool:
@@ -203,7 +179,12 @@ class HeuristicPartitioner(DistrictPartitioner):
         return partitions
 
     def _optimize(
-        self, G: Dict[int, List], P: Dict[int, int], D: Dict[Tuple[int, int], int], size_limit: int
+        self,
+        G: Dict[int, List],
+        P: Dict[int, int],
+        D: Dict[Tuple[int, int], int],
+        size_limit: int,
+        gap: float = 0.0,
     ) -> Dict[int, List[int]]:
         if len(P) > size_limit:
             # Find maximal matching (heuristic)
@@ -252,7 +233,7 @@ class HeuristicPartitioner(DistrictPartitioner):
                     elif j < matching[j]:
                         new_D[i, j] = new_D[j, i] = (distances[j] + distances[matching[j]]) / 2
 
-            sub_partitions = self._optimize(new_G, new_P, new_D, size_limit)
+            sub_partitions = self._optimize(new_G, new_P, new_D, size_limit, gap)
             partitions = {i: [] for i in sub_partitions}
 
             # Unmerge nodes
@@ -265,20 +246,26 @@ class HeuristicPartitioner(DistrictPartitioner):
             # Local optimization
             return self._local_optimize(G, P, D, partitions)
         else:
-            return self._solve_exact(G, P, D)
+            return self._solve_exact(G, P, D, gap)
 
-    def optimize(self, size_limit=10):
+    def optimize(self, gap: float = 0.0, size_limit=15):
         """
         Optimize partitioning using Swamy et al. (2022)
         """
+        G, P_list, D_mat, high_pop_inds = self.isolate_large_nodes()
+        low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
 
-        P = {i: p for i, p in enumerate(self.populations)}
+        P = {i: p for i, p in zip(low_pop_inds, P_list)}
         D = {}
-        for i in range(len(self.distances)):
-            for j in range(i + 1, len(self.distances[i])):
-                D[i, j] = D[j, i] = self.distances[i][j]
+        for i, node_i in enumerate(low_pop_inds):
+            for j, node_j in enumerate(low_pop_inds):
+                D[node_i, node_j] = D[node_j, node_i] = D_mat[i][j]
 
-        self.partitions = self._optimize(self.edges, P, D, max(size_limit, self.num_districts))
+        self.num_districts -= len(high_pop_inds)
+        self.partitions = self._optimize(G, P, D, max(size_limit, self.num_districts), gap)
+
+        self.num_districts += len(high_pop_inds)
+        self.partitions.update({i: [i] for i in high_pop_inds})
 
         return self.partitions
 

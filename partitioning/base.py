@@ -32,6 +32,7 @@ class DistrictPartitioner:
         self.populations = P
         self.num_counties = len(P)
         self.total_population = sum(P)
+        self.avg_population = self.total_population / K
         self.distances = D
 
     def _read_files(state: str) -> Tuple[int, Dict[int, List], List[int], List[List[int]]]:
