@@ -158,21 +158,30 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         for _ in range(self.max_iter):
             if skip == 0:
                 sorted_border_nodes = sorted(border_nodes.items(), key=lambda x: x[1][0])
+            if skip >= len(sorted_border_nodes):
+                break
+
             i, new_part = sorted_border_nodes[skip][0]
             if sorted_border_nodes[skip][1][0] >= 0:
                 break
 
             prev_part = node_partitions[i]
-            partitions[prev_part].remove(i)
-            # if not self._is_connected(partitions[prev_part], G) or not self._is_balanced(
-            #     partitions[prev_part], partitions[new_part], P
-            # ):
-            if not self._is_connected(partitions[prev_part], G):
-                partitions[prev_part].append(i)
+            if len(partitions[prev_part]) == 1:
                 skip += 1
                 continue
 
+            partitions[prev_part].remove(i)
             partitions[new_part].append(i)
+            # Second condition is magic bullshit. This should not be necessary.
+            if not (
+                self._is_connected(partitions[prev_part], G)
+                and self._is_connected(partitions[new_part], G)
+            ):
+                partitions[prev_part].append(i)
+                partitions[new_part].remove(i)
+                skip += 1
+                continue
+
             node_partitions[i] = new_part
             del border_nodes[i, new_part]
             skip = 0
@@ -180,7 +189,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
             for node, part in border_nodes:
                 node_part = node_partitions[node]
                 if node_part in [prev_part, new_part] or part in [prev_part, new_part]:
-                    decrease, count = border_nodes[node, part]
+                    _, count = border_nodes[node, part]
                     border_nodes[node, part] = (cost_increase(node, part), count)
 
             for j in G[i]:
@@ -189,10 +198,10 @@ class BaseSwamyPartitioner(DistrictPartitioner):
                     add_to_border(i, part_j)
                     add_to_border(j, new_part)
                 else:
-                    decrease, count = border_nodes[j, prev_part]
+                    increase, count = border_nodes[j, prev_part]
                     if count == 1:
                         del border_nodes[j, prev_part]
                     else:
-                        border_nodes[j, prev_part] = (decrease, count - 1)
+                        border_nodes[j, prev_part] = (increase, count - 1)
 
         return partitions

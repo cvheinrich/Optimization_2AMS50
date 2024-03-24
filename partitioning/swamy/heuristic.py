@@ -84,124 +84,6 @@ class HeuristicPartitioner(BSP):
 
         return partitions
 
-    def _is_balanced(
-        self, prev_part_nodes: List[int], new_part_nodes: List[int], P: Dict[int, int]
-    ) -> bool:
-        return (
-            abs(sum(P[i] for i in prev_part_nodes) - self.avg_population) < self.slack_value
-            and abs(sum(P[i] for i in new_part_nodes) - self.avg_population) < self.slack_value
-        )
-
-    def _is_connected(self, part_nodes: List[int], G: Dict[int, List[int]]) -> bool:
-        """
-        Check if the partition is connected
-        """
-        visited = {part_nodes[0]}
-        stack = [part_nodes[0]]
-        while stack:
-            node = stack.pop()
-            for neighbor in G[node]:
-                if neighbor in part_nodes and neighbor not in visited:
-                    visited.add(neighbor)
-                    stack.append(neighbor)
-
-        return len(visited) == len(part_nodes)
-
-    def _local_optimize(
-        self,
-        G: Dict[int, List[int]],
-        P: Dict[int, int],
-        D: Dict[Tuple[int, int], int],
-        partitions: Dict[int, List[int]],
-    ) -> Dict[int, List[int]]:
-        """
-        Local optimization heuristic
-        """
-        node_partitions = {node: k for k, partition in partitions.items() for node in partition}
-
-        def cost_increase(node: int, part_B: int) -> int:
-            part_A = node_partitions[node]
-
-            dists_in_new = sum(D[node, i] for i in partitions[part_B])
-            dists_in_prev = sum(D[node, i] for i in partitions[part_A] if i != node)
-
-            pop_A = sum(P[i] for i in partitions[part_A])
-            pop_B = sum(P[i] for i in partitions[part_B])
-
-            return (1 - self.alpha) * (dists_in_new - dists_in_prev) + self.C * self.alpha * (
-                abs(pop_A - P[node] - self.avg_population)
-                + abs(pop_B + P[node] - self.avg_population)
-                - abs(pop_A - self.avg_population)
-                - abs(pop_B - self.avg_population)
-            )
-
-        # key: (node, partition), value: (cost increase, number of neighbors in partition)
-        border_nodes: Dict[Tuple[int, int], Tuple[int, int]] = {}
-
-        def add_to_border(node, partition):
-            if (node, partition) not in border_nodes:
-                border_nodes[node, partition] = (cost_increase(node, partition), 1)
-            else:
-                increase, count = border_nodes[node, partition]
-                border_nodes[node, partition] = (increase, count + 1)
-
-        for i in G:
-            part_i = node_partitions[i]
-            for j in G[i]:
-                part_j = node_partitions[j]
-                if part_i != part_j:
-                    add_to_border(i, part_j)
-
-        skip = 0
-        for iii in range(self.max_iter):
-            assert all(self._is_connected(partitions[i], G) for i in partitions)
-            if skip == 0:
-                sorted_border_nodes = sorted(border_nodes.items(), key=lambda x: x[1][0])
-            i, new_part = sorted_border_nodes[skip][0]
-            if sorted_border_nodes[skip][1][0] >= 0:
-                break
-
-            prev_part = node_partitions[i]
-            if len(partitions[prev_part]) == 1:
-                skip += 1
-                continue
-
-            partitions[prev_part].remove(i)
-            partitions[new_part].append(i)
-            # Second condition is magic bullshit. This should not be necessary.
-            if not (
-                self._is_connected(partitions[prev_part], G)
-                and self._is_connected(partitions[new_part], G)
-            ):
-                partitions[prev_part].append(i)
-                partitions[new_part].remove(i)
-                skip += 1
-                continue
-
-            node_partitions[i] = new_part
-            del border_nodes[i, new_part]
-            skip = 0
-
-            for node, part in border_nodes:
-                node_part = node_partitions[node]
-                if node_part in [prev_part, new_part] or part in [prev_part, new_part]:
-                    _, count = border_nodes[node, part]
-                    border_nodes[node, part] = (cost_increase(node, part), count)
-
-            for j in G[i]:
-                part_j = node_partitions[j]
-                if new_part != part_j:
-                    add_to_border(i, part_j)
-                    add_to_border(j, new_part)
-                else:
-                    increase, count = border_nodes[j, prev_part]
-                    if count == 1:
-                        del border_nodes[j, prev_part]
-                    else:
-                        border_nodes[j, prev_part] = (increase, count - 1)
-
-        return partitions
-
     def _optimize(
         self,
         G: Dict[int, List],
@@ -258,7 +140,6 @@ class HeuristicPartitioner(BSP):
                         new_D[i, j] = new_D[j, i] = distances[j] + distances[matching[j]] / 2
 
             sub_partitions = self._optimize(new_G, new_P, new_D, size_limit, gap)
-            assert all(self._is_connected(sub_partitions[i], new_G) for i in sub_partitions)
             partitions = {i: [] for i in sub_partitions}
 
             # Unmerge nodes
@@ -289,8 +170,6 @@ class HeuristicPartitioner(BSP):
 
         self.num_districts -= len(high_pop_inds)
         self.partitions = self._optimize(G, P, D, max(size_limit, self.num_districts), gap)
-
-        # assert all(self._is_connected(self.partitions[i], G) for i in self.partitions)
 
         self.num_districts += len(high_pop_inds)
         self.partitions.update({i: [i] for i in high_pop_inds})
