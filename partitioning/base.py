@@ -14,7 +14,7 @@ class DistrictPartitioner:
     """
 
     def __init__(
-        self, state: str, K: int, G: Dict[int, List], P: List[int], D: List[List[int]]
+        self, state: str, K: int, G: Dict[int, List[int]], P: List[int], D: List[List[int]]
     ) -> None:
         """
         Initialize partitioner with state data

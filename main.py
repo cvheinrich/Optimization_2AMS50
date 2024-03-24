@@ -39,7 +39,7 @@ if __name__ == "__main__":
     if p_method == "metis":
         dp = MetisPartitioner(args.state)
     elif p_method in ["swamy_o", "optimal"]:
-        dp = BSP.from_files(
+        dp = OptimalPartitioner.from_files(
             args.state, args.alpha, slack_type=args.slack_type, slack_value=args.slack_value
         )
         dp.optimize(gap=args.gap)

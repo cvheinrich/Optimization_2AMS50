@@ -15,21 +15,20 @@ class HeuristicPartitioner(BSP):
         alpha: float = BSP.ALPHA_DEFAULT,
         slack_type: str = BSP.SLACK_DEFAULT,
         slack_value: float = BSP.SLACK_VALUE_DEFAULT,
-        max_iter: int = 500,
+        max_iter: int = BSP.MAX_ITER_DEFAULT,
     ):
         """
         Initialize Swamy partitioner
         """
 
-        super().__init__(state, K, G, P, D, alpha, slack_type, slack_value)
-        self.max_iter = max_iter
+        super().__init__(state, K, G, P, D, alpha, slack_type, slack_value, max_iter)
 
     def from_files(
         state: str,
         alpha: float = BSP.ALPHA_DEFAULT,
         slack_type: str = BSP.SLACK_TYPES,
         slack_value: float = BSP.SLACK_VALUE_DEFAULT,
-        max_iter: int = 500,
+        max_iter: int = BSP.MAX_ITER_DEFAULT,
     ) -> "HeuristicPartitioner":
         """
         Initialize partitioner from files

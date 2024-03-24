@@ -1,5 +1,6 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from partitioning.swamy.base import BaseSwamyPartitioner as BSP
+import random
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -10,12 +11,13 @@ class OptimalPartitioner(BSP):
         self,
         state: str,
         K: int,
-        G: Dict[int, List],
+        G: Dict[int, List[int]],
         P: List[int],
         D: List[List[int]],
         alpha: float = BSP.ALPHA_DEFAULT,
         slack_type: str = BSP.SLACK_DEFAULT,
         slack_value: float = BSP.SLACK_VALUE_DEFAULT,
+        max_iter: int = BSP.MAX_ITER_DEFAULT,
     ) -> None:
         """
         Initialize optimal partitioner.
@@ -25,21 +27,23 @@ class OptimalPartitioner(BSP):
         @param slack_type: Type of slack to use: "fixed", "var", or "dynamic"
         @param slack_value: Value of slack to use (irrelevant in case of slack_type="var")
         """
-        super().__init__(state, K, G, P, D, alpha, slack_type, slack_value)
+        super().__init__(state, K, G, P, D, alpha, slack_type, slack_value, max_iter)
         self._create_model()
+        self._generate_initial_solution()
 
     def from_files(
         state: str,
         alpha: float = BSP.ALPHA_DEFAULT,
         slack_type: str = BSP.SLACK_DEFAULT,
         slack_value: float = BSP.SLACK_VALUE_DEFAULT,
+        max_iter: int = BSP.MAX_ITER_DEFAULT,
     ) -> "OptimalPartitioner":
         """
         Initialize optimal partitioner from files
         """
 
         return OptimalPartitioner(
-            state, *OptimalPartitioner._read_files(state), alpha, slack_type, slack_value
+            state, *OptimalPartitioner._read_files(state), alpha, slack_type, slack_value, max_iter
         )
 
     def _create_model(self) -> None:
@@ -150,6 +154,103 @@ class OptimalPartitioner(BSP):
                     >= 0
                 )
 
+    def _get_initial_partition(self) -> List[List[int]]:
+        partitions = []
+        unpartitioned_nodes = set(range(self.num_counties))
+
+        while len(unpartitioned_nodes) > 0:
+            center = random.choice(tuple(unpartitioned_nodes))
+            partition = [center]
+            unpartitioned_nodes.remove(center)
+            neighbors = {node for node in self.edges[center] if node in unpartitioned_nodes}
+            partition_population = self.populations[center]
+
+            while partition_population < self.avg_population and len(neighbors) > 0:
+                node = random.choice(tuple(neighbors))
+                partition.append(node)
+                unpartitioned_nodes.remove(node)
+                neighbors.remove(node)
+                partition_population += self.populations[node]
+                neighbors = neighbors | {
+                    node for node in self.edges[node] if node in unpartitioned_nodes
+                }
+            partitions.append(partition)
+
+        return partitions
+
+    def _set_initial_flow(self, center: int, node: int, visited: List[bool]) -> int:
+        visited[node] = True
+        outflow = 0
+
+        for neighbor in self.edges[node]:
+            if self.x[center, neighbor].start == 1 and not visited[neighbor]:
+                outflow_neighbor = self._set_initial_flow(center, neighbor, visited)
+                self.flow[center, node, neighbor].start = outflow_neighbor
+                outflow += outflow_neighbor
+
+        return outflow + 1
+
+    def _generate_initial_solution(self):
+        partitions = []
+        partition_pops = []
+        while len(partitions) < self.num_districts:
+            partitions = self._get_initial_partition()
+
+        while len(partitions) > self.num_districts:
+            smallest_partitions = []
+            for _ in range(2):
+                smallest = min(partitions, key=lambda x: sum(self.populations[i] for i in x))
+                smallest_ind = partitions.index(smallest)
+                smallest_partitions.append(partitions.pop(smallest_ind))
+            partitions.append(smallest_partitions[0] + smallest_partitions[1])
+
+        partitions = self._local_optimize(
+            self.edges,
+            {i: p for i, p in enumerate(self.populations)},
+            {
+                (i, j): d
+                for i, row in enumerate(self.distances)
+                for j, d in enumerate(row)
+                if i != j
+            },
+            {i: l for i, l in enumerate(partitions)},
+        )
+
+        for i in range(self.num_counties):
+            for j in range(self.num_counties):
+                self.x[i, j].start = 0
+                for k in range(j + 1, self.num_counties):
+                    self.y[i, j, k].start = 0
+
+        for partition in partitions.values():
+            i = partition[0]
+            self.x[i, i].start = 1
+            for j in partition[1:]:
+                self.x[i, j].start = 1
+
+        self.model.update()
+
+        for i in range(self.num_counties):
+            if self.x[i, i].start == 1:
+                self._set_initial_flow(i, i, [False] * self.num_counties)
+                for j in range(self.num_counties):
+                    for k in range(j + 1, self.num_counties):
+                        if self.x[i, j].start == 1 and self.x[i, k].start == 1:
+                            self.y[i, j, k].start = 1
+
+        part_ind = 0
+        for i in range(self.num_counties):
+            if self.x[i, i].start == 1:
+                population_ratio = (
+                    sum(self.populations[j] for j in partitions[part_ind]) / self.avg_population
+                )
+                part_ind += 1
+                lower_slack = 1 - population_ratio
+                upper_slack = 1 + population_ratio
+                self.slack[i].start = max(lower_slack, upper_slack)
+
+        self.model.update()
+
     def update_model(self, alpha: float, slack_type: str, slack_value: float) -> None:
         """
         Update model with new parameters
@@ -162,7 +263,6 @@ class OptimalPartitioner(BSP):
     def optimize(self, gap=0, slack_step=0.001) -> gp.Model:
         """
         Optimize model.
-        TODO: add large node isolation
 
         @param gap: MIP gap
         @param slack_step: Step size for increasing slack_value in case of infeasible model
@@ -207,7 +307,7 @@ class OptimalPartitioner(BSP):
 
     def _get_district_counties(self) -> Dict[int, List[int]]:
         return {
-            i: [j for j in range(self.num_counties) if self.x[i, j].X > 0.5]
+            i: [j for j in range(self.num_counties) if self.x[i, j].X == 1]
             for i in range(self.num_counties)
-            if self.x[i, i].X > 0.5
+            if self.x[i, i].X == 1
         }
