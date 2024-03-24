@@ -82,7 +82,8 @@ class OptimalPartitioner(BSP):
         self.model.setObjective(
             (
                 # Minimize within-district distances, i.e. spread
-                gp.quicksum(
+                (1 - self.alpha)
+                * gp.quicksum(
                     self.y[i, j, k] * self.distances[i][k]
                     for i in range(self.num_counties)
                     for j in range(self.num_counties)
@@ -161,7 +162,12 @@ class OptimalPartitioner(BSP):
         while len(unpartitioned_nodes) > 0:
             center = random.choice(tuple(unpartitioned_nodes))
             partition = [center]
+            partitions.append(partition)
             unpartitioned_nodes.remove(center)
+
+            if len(unpartitioned_nodes) + len(partitions) == self.num_districts:
+                continue
+
             neighbors = {node for node in self.edges[center] if node in unpartitioned_nodes}
             partition_population = self.populations[center]
 
@@ -174,7 +180,6 @@ class OptimalPartitioner(BSP):
                 neighbors = neighbors | {
                     node for node in self.edges[node] if node in unpartitioned_nodes
                 }
-            partitions.append(partition)
 
         return partitions
 
@@ -192,7 +197,6 @@ class OptimalPartitioner(BSP):
 
     def _generate_initial_solution(self):
         partitions = []
-        partition_pops = []
         while len(partitions) < self.num_districts:
             partitions = self._get_initial_partition()
 

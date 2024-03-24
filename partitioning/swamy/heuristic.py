@@ -128,17 +128,11 @@ class HeuristicPartitioner(BSP):
             pop_A = sum(P[i] for i in partitions[part_A])
             pop_B = sum(P[i] for i in partitions[part_B])
 
-            return (
-                dists_in_new
-                - dists_in_prev
-                + self.C
-                * self.alpha
-                * (
-                    abs(pop_A - P[node] - self.avg_population)
-                    + abs(pop_B + P[node] - self.avg_population)
-                    - abs(pop_A - self.avg_population)
-                    - abs(pop_B - self.avg_population)
-                )
+            return (1 - self.alpha) * (dists_in_new - dists_in_prev) + self.C * self.alpha * (
+                abs(pop_A - P[node] - self.avg_population)
+                + abs(pop_B + P[node] - self.avg_population)
+                - abs(pop_A - self.avg_population)
+                - abs(pop_B - self.avg_population)
             )
 
         # key: (node, partition), value: (cost increase, number of neighbors in partition)
@@ -159,7 +153,8 @@ class HeuristicPartitioner(BSP):
                     add_to_border(i, part_j)
 
         skip = 0
-        for _ in range(self.max_iter):
+        for iii in range(self.max_iter):
+            assert all(self._is_connected(partitions[i], G) for i in partitions)
             if skip == 0:
                 sorted_border_nodes = sorted(border_nodes.items(), key=lambda x: x[1][0])
             i, new_part = sorted_border_nodes[skip][0]
@@ -167,16 +162,22 @@ class HeuristicPartitioner(BSP):
                 break
 
             prev_part = node_partitions[i]
-            partitions[prev_part].remove(i)
-            # if not self._is_connected(partitions[prev_part], G) or not self._is_balanced(
-            #     partitions[prev_part], partitions[new_part], P
-            # ):
-            if not self._is_connected(partitions[prev_part], G):
-                partitions[prev_part].append(i)
+            if len(partitions[prev_part]) == 1:
                 skip += 1
                 continue
 
+            partitions[prev_part].remove(i)
             partitions[new_part].append(i)
+            # Second condition is magic bullshit. This should not be necessary.
+            if not (
+                self._is_connected(partitions[prev_part], G)
+                and self._is_connected(partitions[new_part], G)
+            ):
+                partitions[prev_part].append(i)
+                partitions[new_part].remove(i)
+                skip += 1
+                continue
+
             node_partitions[i] = new_part
             del border_nodes[i, new_part]
             skip = 0
@@ -184,7 +185,7 @@ class HeuristicPartitioner(BSP):
             for node, part in border_nodes:
                 node_part = node_partitions[node]
                 if node_part in [prev_part, new_part] or part in [prev_part, new_part]:
-                    decrease, count = border_nodes[node, part]
+                    _, count = border_nodes[node, part]
                     border_nodes[node, part] = (cost_increase(node, part), count)
 
             for j in G[i]:
@@ -193,11 +194,11 @@ class HeuristicPartitioner(BSP):
                     add_to_border(i, part_j)
                     add_to_border(j, new_part)
                 else:
-                    decrease, count = border_nodes[j, prev_part]
+                    increase, count = border_nodes[j, prev_part]
                     if count == 1:
                         del border_nodes[j, prev_part]
                     else:
-                        border_nodes[j, prev_part] = (decrease, count - 1)
+                        border_nodes[j, prev_part] = (increase, count - 1)
 
         return partitions
 
@@ -257,6 +258,7 @@ class HeuristicPartitioner(BSP):
                         new_D[i, j] = new_D[j, i] = distances[j] + distances[matching[j]] / 2
 
             sub_partitions = self._optimize(new_G, new_P, new_D, size_limit, gap)
+            assert all(self._is_connected(sub_partitions[i], new_G) for i in sub_partitions)
             partitions = {i: [] for i in sub_partitions}
 
             # Unmerge nodes
@@ -275,7 +277,8 @@ class HeuristicPartitioner(BSP):
         """
         Optimize partitioning using Swamy et al. (2022)
         """
-        G, P_list, D_mat, high_pop_inds = self.isolate_large_nodes()
+        # TODO: who wrote this spaghetti code?
+        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=False)
         low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
 
         P = {i: p for i, p in zip(low_pop_inds, P_list)}
@@ -286,6 +289,8 @@ class HeuristicPartitioner(BSP):
 
         self.num_districts -= len(high_pop_inds)
         self.partitions = self._optimize(G, P, D, max(size_limit, self.num_districts), gap)
+
+        # assert all(self._is_connected(self.partitions[i], G) for i in self.partitions)
 
         self.num_districts += len(high_pop_inds)
         self.partitions.update({i: [i] for i in high_pop_inds})
@@ -299,7 +304,9 @@ class HeuristicPartitioner(BSP):
         for i, partition in self.partitions.items():
             population = sum(self.populations[j] for j in partition)
             distance = sum(self.distances[j][k] for j in partition for k in partition if j != k) / 2
-            value = distance + self.C * self.alpha * abs(population - self.avg_population)
+            value = (1 - self.alpha) * distance + self.C * self.alpha * abs(
+                population - self.avg_population
+            )
 
             print(f"District {i}:")
             print(partition)

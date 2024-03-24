@@ -8,7 +8,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
     SLACK_TYPES = [SLACK_FIXED, SLACK_VARIABLE]
     SLACK_DEFAULT = SLACK_VARIABLE
 
-    ALPHA_DEFAULT = 1.0
+    ALPHA_DEFAULT = 0.5
     SLACK_VALUE_DEFAULT = 0.025
     MAX_ITER_DEFAULT = 500
 
@@ -29,16 +29,15 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         """
         super().__init__(state, K, G, P, D)
         self.alpha = alpha
+        if alpha < 0 or alpha > 1:
+            raise ValueError("Alpha must be between 0 and 1")
+
         self.slack_type = slack_type
         self.slack_value = slack_value
         self.max_iter = max_iter
-        # With alpha = 1.0 compactness and population balance should be equally important
-        # In the case when all counties are in one district:
-        #  - population imbalance is (K-1) / K * total_population
-        #  - spread is the sum of all distances
-        # Based on this C = K / (K-1) * sum(distances) / total_population
-        self.C = (
-            K / (K - 1) * sum(sum(row[i + 1 :]) for i, row in enumerate(D)) / self.total_population
+        # Calculate normalization constant to attempt to make alpha more sensible
+        self.C = self.total_population / (
+            sum(self.distances[i][j] for i in self.edges for j in self.edges[i])
         )
         print(f"C = {self.C}")
 
@@ -61,11 +60,13 @@ class BaseSwamyPartitioner(DistrictPartitioner):
             max_iter,
         )
 
-    def isolate_large_nodes(
-        self,
+    def prepare_graph(
+        self, remove_large_nodes: bool = True
     ) -> Tuple[Dict[int, List[int]], List[int], List[List[int]], List[int]]:
         """
-        @return: Tuple of (G', P', D', large_nodes), where G',P',D' are created by removing large nodes
+        @param remove_large_nodes: If True, remove large nodes from the graph
+        @return: Tuple of (G', P', D', large_nodes), where G',P',D' are created by removing large nodes,
+                 if `remove_large_nodes` is True, otherwise return the original G,P,D
         """
         limit = self.avg_population + self.slack_value
 
@@ -129,17 +130,11 @@ class BaseSwamyPartitioner(DistrictPartitioner):
             pop_A = sum(P[i] for i in partitions[part_A])
             pop_B = sum(P[i] for i in partitions[part_B])
 
-            return (
-                dists_in_new
-                - dists_in_prev
-                + self.C
-                * self.alpha
-                * (
-                    abs(pop_A - P[node] - self.avg_population)
-                    + abs(pop_B + P[node] - self.avg_population)
-                    - abs(pop_A - self.avg_population)
-                    - abs(pop_B - self.avg_population)
-                )
+            return (1 - self.alpha) * (dists_in_new - dists_in_prev) + self.C * self.alpha * (
+                abs(pop_A - P[node] - self.avg_population)
+                + abs(pop_B + P[node] - self.avg_population)
+                - abs(pop_A - self.avg_population)
+                - abs(pop_B - self.avg_population)
             )
 
         # key: (node, partition), value: (cost increase, number of neighbors in partition)
