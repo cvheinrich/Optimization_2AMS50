@@ -95,9 +95,13 @@ class DistrictPartitioner:
             DATA_PATH, self.state, "counties", "maps", f"{self.state}_counties.shp"
         )
         counties_gdf = gpd.read_file(shape_file)
+        
 
         counties_gdf["county_id"] = range(len(counties_gdf))
         counties_gdf["district"] = -1
+        counties_gdf["population"] = self.populations
+
+        avg_population = sum(self.populations) / self.num_districts
 
         districts = self._get_district_counties()
         ind_map = dict(zip(districts.keys(), range(len(districts))))
@@ -120,16 +124,22 @@ class DistrictPartitioner:
             color=counties_gdf["color"],
         )
 
+        for idx, row in counties_gdf.iterrows():
+            centroid = row['geometry'].centroid
+            # Format the population number with thousand separators as periods
+            formatted_population = "{:,}".format(row['population']).replace(",", ".")
+            plt.annotate(text=formatted_population, xy=(centroid.x, centroid.y), xytext=(-15, -10), textcoords="offset points")
+
         district_pop = [sum(self.populations[j] for j in d) for d in districts.values()]
         district_dist = [
             sum(self.distances[i][j] for i in d for j in d if i != j) for d in districts.values()
         ]
-
+        
         legend_elements = [
             Patch(
                 facecolor=colors[k],
                 edgecolor="k",
-                label="Pop. {:,.0f}\nDist. {:,.0f}".format(district_pop[k], district_dist[k]),
+                label="Pop. {:,.0f}, Normalized: {:,.2f}\nDist. {:,.0f}".format(district_pop[k], district_pop[k]/avg_population ,district_dist[k]),
             )
             for k in districts
         ]

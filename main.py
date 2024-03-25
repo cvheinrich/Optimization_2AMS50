@@ -2,7 +2,7 @@ import argparse
 from partitioning.swamy.base import BaseSwamyPartitioner as BSP
 from partitioning.swamy.optimal import OptimalPartitioner
 from partitioning.swamy.heuristic import HeuristicPartitioner
-from partitioning.metis import MetisPartitioner
+#from partitioning.metis import MetisPartitioner
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Districting")
@@ -36,9 +36,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     p_method = args.method
 
-    if p_method == "metis":
-        dp = MetisPartitioner(args.state)
-    elif p_method in ["swamy_o", "optimal"]:
+    # if p_method == "metis":
+    #     dp = MetisPartitioner(args.state)
+    if p_method in ["swamy_o", "optimal"]:
         dp = OptimalPartitioner.from_files(
             args.state, args.alpha, slack_type=args.slack_type, slack_value=args.slack_value
         )
