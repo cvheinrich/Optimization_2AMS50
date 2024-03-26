@@ -61,30 +61,49 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         )
 
     def prepare_graph(
-        self, remove_large_nodes: bool = True
-    ) -> Tuple[Dict[int, List[int]], List[int], List[List[int]], List[int]]:
+        self, pop_dict, remove_large_nodes: bool = True
+    ) -> Tuple[Dict[int, List[int]], List[List[int]], List[int]]:
         """
+        @param pop dict: Dictionary of population of each node with index of right node.
         @param remove_large_nodes: If True, remove large nodes from the graph
-        @return: Tuple of (G', P', D', large_nodes), where G',P',D' are created by removing large nodes,
-                 if `remove_large_nodes` is True, otherwise return the original G,P,D
+        @return: Tuple of (G, D, large_nodes), where G,D are created by removing large nodes,
+                 if `remove_large_nodes` is True, otherwise return the original G,D
         """
-        limit = self.avg_population + self.slack_value
-
-        large_nodes = [i for i, p in enumerate(self.populations) if p > limit]
-
-        G = {
+        self.districts = {}
+        for i in range(1,num_districts+1):
+            self.districts[num_districts] = []
+        avg_population_updated = self.avg_population
+        #limit = self.avg_population + self.slack_value
+        sorted_pop_dct = dict(sorted(pop_dict.items(), key=lambda item: item[1], reverse=True))
+        large_nodes = []
+        num_districts = self.num_districts
+        
+        
+        for i, p in sorted_pop_dct.items():
+                if p > avg_population_updated * 1.05:
+                        large_nodes.append(i)
+                        for distr_num in range(num_districts):
+                            if not districts[distr_num]:
+                                self.districts[distr_num].append(i)
+                            else:
+                                pass
+                        num_districts -= 1
+                        avg_population_updated = (avg_population_updated * (num_districts+1) - p)/ (num_districts)
+                else:
+                        break   
+        self.avg_population = avg_population_updated
+        neighbours = {
             i: [j for j in self.edges[i] if j not in large_nodes]
             for i in self.edges
             if i not in large_nodes
         }
-        P = [p for i, p in enumerate(self.populations) if i not in large_nodes]
         D = [
             [d for j, d in enumerate(row) if j not in large_nodes]
             for i, row in enumerate(self.distances)
             if i not in large_nodes
         ]
 
-        return G, P, D, large_nodes
+        return neighbours, D, large_nodes
 
     def _is_balanced(
         self, prev_part_nodes: List[int], new_part_nodes: List[int], P: Dict[int, int]

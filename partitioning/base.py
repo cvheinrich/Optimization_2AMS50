@@ -35,7 +35,7 @@ class DistrictPartitioner:
         self.avg_population = self.total_population / K
         self.distances = D
 
-    def _read_files(state: str) -> Tuple[int, Dict[int, List], List[int], List[List[int]]]:
+    def _read_files(self, state: str) -> Tuple[int, Dict[int, List], List[int], List[List[int]]]:
         """
         Read data from files, including:
         - Population of each county
@@ -57,12 +57,15 @@ class DistrictPartitioner:
                     break
 
         populations = []
+        pop_dct = {}
         with open(population_file, "r") as file:
             total_population = int(next(file).split("=")[-1].strip())
             for line in file:
                 ind, pop = line.split()
                 populations.append(int(pop))
+                pop_dct[int(ind)] = int(pop)
         num_counties = len(populations)
+        self.pop_dct = pop_dct
 
         distances = [[0] * num_counties for _ in range(num_counties)]
         edges = {i: [] for i in range(num_counties)}
@@ -101,8 +104,6 @@ class DistrictPartitioner:
         counties_gdf["district"] = -1
         counties_gdf["population"] = self.populations
 
-        avg_population = sum(self.populations) / self.num_districts
-
         districts = self._get_district_counties()
         ind_map = dict(zip(districts.keys(), range(len(districts))))
         districts = {ind_map[k]: v for k, v in districts.items()}
@@ -139,7 +140,7 @@ class DistrictPartitioner:
             Patch(
                 facecolor=colors[k],
                 edgecolor="k",
-                label="Pop. {:,.0f}, Normalized: {:,.2f}\nDist. {:,.0f}".format(district_pop[k], district_pop[k]/avg_population ,district_dist[k]),
+                label="Pop. {:,.0f}, Normalized: {:,.2f}\nDist. {:,.0f}".format(district_pop[k], district_pop[k]/self.avg_population ,district_dist[k]),
             )
             for k in districts
         ]

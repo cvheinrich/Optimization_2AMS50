@@ -92,6 +92,41 @@ class HeuristicPartitioner(BSP):
         size_limit: int,
         gap: float = 0.0,
     ) -> Dict[int, List[int]]:
+        
+        #self.partitions = self._optimize(neighbours, P, D, max(size_limit, self.num_districts), gap)
+        sorted_pop_neighbour_dct = {}
+        for county in G:
+            temp_dct = {}
+            for neighbour in G[county]:
+                temp_dct[neighbour] = P[neighbour]
+            G[county] = temp_dct
+            sorted_pop_neighbour_dct[county] = dict(sorted(G[county].items(), key=lambda item: item[1]))
+            #sorted_pop_neighbour_dct = list(sorted_pop_neighbour_dct.keys())
+
+
+        #Toevoegen dat die neighbours update
+        #Als een county is geupdate van neighbours, ook weghalen bij P.keys()
+        for county in P.keys():
+            pop_count_dist = P[county]
+            for neighbour in G[county]:
+                pop_count = pop_count_dist + P[neighbour]
+                if pop_count < self.avg_population * 1.05:
+                    pop_count_dist = pop_count_dist + P[neighbour]
+                    G[county].update(G[neighbour]) #Update neighbours.
+                    del P[neighbour]
+                    del G[county]
+                    del G[neighbour]
+                    G[county] = dict(sorted(G[county].items(), key=lambda item: item[1]))
+                    for distr_num in range(self.num_districts):
+                        if not self.districts[distr_num]:
+                            self.districts[distr_num].append(county,neighbour)
+                        elif county in self.districts[distr_num]:
+                            self.districts[distr_num].append(neighbour)                    
+                        else:
+                            pass
+                else:
+                    break 
+
         if len(P) > size_limit:
             # Find maximal matching (heuristic)
             P_edges = sorted([(P[i] + P[j], i, j) for i in G for j in G[i] if i < j])
@@ -159,19 +194,21 @@ class HeuristicPartitioner(BSP):
         Optimize partitioning using Swamy et al. (2022)
         """
         # TODO: who wrote this spaghetti code?
-        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=False)
-        low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
+        
+        neighbours, D_mat, high_pop_inds = self.prepare_graph(self.pop_dct, remove_large_nodes=False)
+        
+        new_pop_dict = {key: value for key, value in self.pop_dct.items() if key not in high_pop_inds}
+        P = dict(sorted(new_pop_dict.items(), key=lambda item: item[1]), reverse=True)
 
-        P = {i: p for i, p in zip(low_pop_inds, P_list)}
         D = {}
-        for i, node_i in enumerate(low_pop_inds):
-            for j, node_j in enumerate(low_pop_inds):
+        for node_i, i in P.items():
+            for node_j, j in P.items():
                 D[node_i, node_j] = D[node_j, node_i] = D_mat[i][j]
 
-        self.num_districts -= len(high_pop_inds)
-        self.partitions = self._optimize(G, P, D, max(size_limit, self.num_districts), gap)
+        #self.num_districts -= len(high_pop_inds)
+        self.partitions = self._optimize(neighbours, P, D, max(size_limit, self.num_districts), gap)
 
-        self.num_districts += len(high_pop_inds)
+        #self.num_districts += len(high_pop_inds)
         self.partitions.update({i: [i] for i in high_pop_inds})
 
         return self.partitions
