@@ -9,7 +9,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
     SLACK_DEFAULT = SLACK_VARIABLE
 
     ALPHA_DEFAULT = 0.5
-    SLACK_VALUE_DEFAULT = 0.025
+    SLACK_VALUE_DEFAULT = 0.05
     MAX_ITER_DEFAULT = 500
 
     def __init__(
@@ -68,9 +68,12 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         @return: Tuple of (G', P', D', large_nodes), where G',P',D' are created by removing large nodes,
                  if `remove_large_nodes` is True, otherwise return the original G,P,D
         """
-        limit = self.avg_population + self.slack_value
+        limit = self.avg_population * (1 + self.slack_value)
 
-        large_nodes = [i for i, p in enumerate(self.populations) if p > limit]
+        if remove_large_nodes:
+            large_nodes = [i for i, p in enumerate(self.populations) if p > limit]
+        else:
+            large_nodes = []
 
         G = {
             i: [j for j in self.edges[i] if j not in large_nodes]
@@ -205,3 +208,19 @@ class BaseSwamyPartitioner(DistrictPartitioner):
                         border_nodes[j, prev_part] = (increase, count - 1)
 
         return partitions
+
+    def _get_partition_cost(self, partition: List[int]) -> float:
+        population = sum(self.populations[i] for i in partition)
+        distance = sum(self.distances[i][j] for i in partition for j in partition)
+        return 0.0001 * (
+            (1 - self.alpha) * distance
+            + self.C * self.alpha * abs(population - self.avg_population)
+        )
+
+    def _get_total_cost(self) -> float:
+        raise NotImplementedError
+
+    def _get_run_summary(self):
+        return "Alpha: {}, Slack: {} {},\nCost: {}".format(
+            self.alpha, self.slack_type, self.slack_value, self._get_total_cost()
+        )

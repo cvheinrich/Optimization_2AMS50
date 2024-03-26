@@ -98,6 +98,7 @@ class DistrictPartitioner:
 
         counties_gdf["county_id"] = range(len(counties_gdf))
         counties_gdf["district"] = -1
+        counties_gdf["population"] = self.populations
 
         districts = self._get_district_counties()
         ind_map = dict(zip(districts.keys(), range(len(districts))))
@@ -120,26 +121,45 @@ class DistrictPartitioner:
             color=counties_gdf["color"],
         )
 
+        for _, row in counties_gdf.iterrows():
+            centroid = row["geometry"].centroid
+            # Format the population number with thousand separators as periods
+            formatted_population = "{:,}".format(row["population"])
+            plt.annotate(
+                text=formatted_population,
+                xy=(centroid.x, centroid.y),
+                xytext=(-15, -5),
+                textcoords="offset points",
+            )
+
         district_pop = [sum(self.populations[j] for j in d) for d in districts.values()]
         district_dist = [
             sum(self.distances[i][j] for i in d for j in d if i != j) for d in districts.values()
         ]
+        cost_sorted_districts = sorted(
+            districts, key=lambda x: self._get_partition_cost(districts[x]), reverse=True
+        )
 
         legend_elements = [
             Patch(
                 facecolor=colors[k],
                 edgecolor="k",
-                label="Pop. {:,.0f}\nDist. {:,.0f}".format(district_pop[k], district_dist[k]),
+                label=(
+                    "Pop. {:,.0f},\nDist. {:,.0f}\nCost {:,.2f}".format(
+                        district_pop[k], district_dist[k], self._get_partition_cost(districts[k])
+                    )
+                ),
             )
-            for k in districts
+            for k in cost_sorted_districts
         ]
         ax.legend(
             handles=legend_elements,
-            title="District Information",
+            title="District Information \nAvg Pop. {:,.0f}".format(self.avg_population),
             loc="upper left",
             bbox_to_anchor=(1, 1),
         )
 
+        plt.title(self._get_run_summary())
         plt.tight_layout()
         plt.show()
 
@@ -150,4 +170,7 @@ class DistrictPartitioner:
         raise NotImplementedError
 
     def _get_district_counties(self) -> Dict[int, List[int]]:
+        raise NotImplementedError
+
+    def _get_run_summary(self) -> str:
         raise NotImplementedError

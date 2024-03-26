@@ -271,7 +271,7 @@ class OptimalPartitioner(BSP):
         self.slack_value = slack_value
         self._create_model()
 
-    def optimize(self, gap=100, slack_step=0.001) -> gp.Model:
+    def optimize(self, gap=0.0, slack_step=0.001) -> gp.Model:
         """
         Optimize model.
 
@@ -322,3 +322,6 @@ class OptimalPartitioner(BSP):
             for i in range(self.num_counties)
             if self.x[i, i].X == 1
         }
+
+    def _get_total_cost(self) -> float:
+        return self.model.ObjVal

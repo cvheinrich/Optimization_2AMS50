@@ -159,7 +159,8 @@ class HeuristicPartitioner(BSP):
         Optimize partitioning using Swamy et al. (2022)
         """
         # TODO: who wrote this spaghetti code?
-        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=True)
+        remove_large_nodes = self.slack_type == BSP.SLACK_FIXED
+        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes)
         low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
 
         P = {i: p for i, p in zip(low_pop_inds, P_list)}
@@ -180,16 +181,17 @@ class HeuristicPartitioner(BSP):
     def _get_district_counties(self) -> Dict[int, List[int]]:
         return self.partitions
 
+    def _get_total_cost(self) -> float:
+        return sum(self._get_partition_cost(partition) for partition in self.partitions.values())
+
     def print_solution(self) -> Dict[int, List[int]]:
         for i, partition in self.partitions.items():
             population = sum(self.populations[j] for j in partition)
             distance = sum(self.distances[j][k] for j in partition for k in partition if j != k) / 2
-            value = (1 - self.alpha) * distance + self.C * self.alpha * abs(
-                population - self.avg_population
-            )
+            cost = self._get_partition_cost(partition)
 
-            print(f"District {i}:")
+            print(f"\nDistrict {i}:")
             print(partition)
             print(f"Population: {population}")
             print(f"Distance: {distance}")
-            print(f"Value: {value}")
+            print(f"Cost: {cost}")
