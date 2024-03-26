@@ -70,6 +70,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
                  if `remove_large_nodes` is True, otherwise return the original G,D
         """
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         self.districts = {}
         for i in range(1,num_districts+1):
             self.districts[num_districts] = []
@@ -80,11 +81,14 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         num_districts = self.num_districts
         
 =======
+=======
+>>>>>>> Stashed changes
         num_districts = self.num_districts
         avg_population_updated = self.avg_population
         pop_dict = {i: value for i, value in enumerate(self.populations)}
         sorted_pop_dct = dict(sorted(pop_dict.items(), key=lambda item: item[1], reverse=True))
         large_nodes = []
+<<<<<<< Updated upstream
 >>>>>>> Stashed changes
         
         for i, p in sorted_pop_dct.items():
@@ -106,7 +110,17 @@ class BaseSwamyPartitioner(DistrictPartitioner):
 <<<<<<< Updated upstream
         neighbours = {
 =======
+=======
+>>>>>>> Stashed changes
 
+        for i, p in sorted_pop_dct.items():
+                if p > avg_population_updated * 1.05:
+                        large_nodes.append(i)
+                        num_districts -= 1
+                        avg_population_updated = (avg_population_updated * (num_districts+1) - p)/ (num_districts)
+                else:
+                        break   
+        self.avg_population = avg_population_updated
         G = {
 >>>>>>> Stashed changes
             i: [j for j in self.edges[i] if j not in large_nodes]

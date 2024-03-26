@@ -104,6 +104,11 @@ class DistrictPartitioner:
         counties_gdf["district"] = -1
         counties_gdf["population"] = self.populations
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+
+        avg_population = self.avg_population
+>>>>>>> Stashed changes
 =======
 
         avg_population = self.avg_population
@@ -135,7 +140,11 @@ class DistrictPartitioner:
             # Format the population number with thousand separators as periods
             formatted_population = "{:,}".format(row['population']).replace(",", ".")
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
             plt.annotate(text=formatted_population, xy=(centroid.x, centroid.y), xytext=(-15, -10), textcoords="offset points")
+=======
+            plt.annotate(text=formatted_population, xy=(centroid.x, centroid.y), xytext=(-15, -5), textcoords="offset points")
+>>>>>>> Stashed changes
 =======
             plt.annotate(text=formatted_population, xy=(centroid.x, centroid.y), xytext=(-15, -5), textcoords="offset points")
 >>>>>>> Stashed changes
@@ -150,7 +159,11 @@ class DistrictPartitioner:
                 facecolor=colors[k],
                 edgecolor="k",
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                 label="Pop. {:,.0f}, Normalized: {:,.2f}\nDist. {:,.0f}".format(district_pop[k], district_pop[k]/self.avg_population ,district_dist[k]),
+=======
+                label= "Doesn't contribute to avg Pop, Pop. {:,.0f}\nDist. {:,.0f}".format(district_pop[k], district_dist[k]) if districts[k][0] in self.high_pop_inds else "Pop. {:,.0f}, Normalized with avg Pop: {:,.2f}\nDist. {:,.0f}".format(district_pop[k], district_pop[k]/avg_population ,district_dist[k]),
+>>>>>>> Stashed changes
 =======
                 label= "Doesn't contribute to avg Pop, Pop. {:,.0f}\nDist. {:,.0f}".format(district_pop[k], district_dist[k]) if districts[k][0] in self.high_pop_inds else "Pop. {:,.0f}, Normalized with avg Pop: {:,.2f}\nDist. {:,.0f}".format(district_pop[k], district_pop[k]/avg_population ,district_dist[k]),
 >>>>>>> Stashed changes
