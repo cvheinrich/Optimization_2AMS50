@@ -194,12 +194,19 @@ class HeuristicPartitioner(BSP):
         Optimize partitioning using Swamy et al. (2022)
         """
         # TODO: who wrote this spaghetti code?
+<<<<<<< Updated upstream
         
         neighbours, D_mat, high_pop_inds = self.prepare_graph(self.pop_dct, remove_large_nodes=False)
         
         new_pop_dict = {key: value for key, value in self.pop_dct.items() if key not in high_pop_inds}
         P = dict(sorted(new_pop_dict.items(), key=lambda item: item[1]), reverse=True)
 
+=======
+        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=False)
+        low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
+        self.high_pop_inds = high_pop_inds
+        P = {i: p for i, p in zip(low_pop_inds, P_list)}
+>>>>>>> Stashed changes
         D = {}
         for node_i, i in P.items():
             for node_j, j in P.items():
