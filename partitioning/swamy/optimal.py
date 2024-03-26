@@ -21,10 +21,6 @@ class OptimalPartitioner(BSP):
     ) -> None:
         """
         Initialize optimal partitioner.
-
-        @param state: State to partition
-        @param alpha: Weight for population imbalance
-        @param slack_type: Type of slack to use: "fixed", "var", or "dynamic"
         @param slack_value: Value of slack to use (irrelevant in case of slack_type="var")
         """
         super().__init__(state, K, G, P, D, alpha, slack_type, slack_value, max_iter)
@@ -195,18 +191,26 @@ class OptimalPartitioner(BSP):
 
         return outflow + 1
 
+    def _get_smallest_neighbor(self, partitions: List[List[int]], part_ind: int) -> int:
+        neighbor_parts = []
+        for i in partitions[part_ind]:
+            for j in self.edges[i]:
+                if j not in partitions[part_ind]:
+                    part_j = next((k for k, part in enumerate(partitions) if j in part), None)
+                    neighbor_parts.append(part_j)
+
+        return min(neighbor_parts, key=lambda x: sum(self.populations[i] for i in partitions[x]))
+
     def _generate_initial_solution(self):
         partitions = []
         while len(partitions) < self.num_districts:
             partitions = self._get_initial_partition()
 
         while len(partitions) > self.num_districts:
-            smallest_partitions = []
-            for _ in range(2):
-                smallest = min(partitions, key=lambda x: sum(self.populations[i] for i in x))
-                smallest_ind = partitions.index(smallest)
-                smallest_partitions.append(partitions.pop(smallest_ind))
-            partitions.append(smallest_partitions[0] + smallest_partitions[1])
+            smallest = min(partitions, key=lambda x: sum(self.populations[i] for i in x))
+            smallest_ind = partitions.index(smallest)
+            smallest_neighbor_ind = self._get_smallest_neighbor(partitions, smallest_ind)
+            partitions.append(partitions.pop(smallest_ind) + partitions.pop(smallest_neighbor_ind))
 
         partitions = self._local_optimize(
             self.edges,
@@ -251,7 +255,10 @@ class OptimalPartitioner(BSP):
                 part_ind += 1
                 lower_slack = 1 - population_ratio
                 upper_slack = 1 + population_ratio
-                self.slack[i].start = max(lower_slack, upper_slack)
+                if self.slack_type == BSP.SLACK_VARIABLE:
+                    self.slack[i].start = max(lower_slack, upper_slack)
+                elif self.slack_type == BSP.SLACK_FIXED:
+                    self.slack[i] = max(lower_slack, upper_slack)
 
         self.model.update()
 
@@ -264,7 +271,7 @@ class OptimalPartitioner(BSP):
         self.slack_value = slack_value
         self._create_model()
 
-    def optimize(self, gap=0, slack_step=0.001) -> gp.Model:
+    def optimize(self, gap=100, slack_step=0.001) -> gp.Model:
         """
         Optimize model.
 

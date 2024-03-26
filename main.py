@@ -32,6 +32,9 @@ if __name__ == "__main__":
         help="Starting slack value for fixed and dynamic solution types",
     )
     parser.add_argument("-g", "--gap", type=float, default=0.0, help="Gap for optimal partitioner")
+    parser.add_argument(
+        "-l", "--size_limit", type=int, default=15, help="Size limit for heuristic partitioner"
+    )
 
     args = parser.parse_args()
     p_method = args.method
@@ -47,7 +50,7 @@ if __name__ == "__main__":
         dp = HeuristicPartitioner.from_files(
             args.state, args.alpha, args.slack_type, args.slack_value, 1000
         )
-        dp.optimize(gap=args.gap)
+        dp.optimize(gap=args.gap, size_limit=args.size_limit)
 
     if args.verbose:
         dp.print_solution()

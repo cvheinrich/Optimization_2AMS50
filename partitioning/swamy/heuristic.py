@@ -159,7 +159,7 @@ class HeuristicPartitioner(BSP):
         Optimize partitioning using Swamy et al. (2022)
         """
         # TODO: who wrote this spaghetti code?
-        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=False)
+        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=True)
         low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
 
         P = {i: p for i, p in zip(low_pop_inds, P_list)}
@@ -169,7 +169,8 @@ class HeuristicPartitioner(BSP):
                 D[node_i, node_j] = D[node_j, node_i] = D_mat[i][j]
 
         self.num_districts -= len(high_pop_inds)
-        self.partitions = self._optimize(G, P, D, max(size_limit, self.num_districts), gap)
+        actual_size_limit = min(self.num_counties, max(size_limit, self.num_districts))
+        self.partitions = self._optimize(G, P, D, actual_size_limit, gap)
 
         self.num_districts += len(high_pop_inds)
         self.partitions.update({i: [i] for i in high_pop_inds})
