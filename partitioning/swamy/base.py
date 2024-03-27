@@ -68,10 +68,20 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         @return: Tuple of (G', P', D', large_nodes), where G',P',D' are created by removing large nodes,
                  if `remove_large_nodes` is True, otherwise return the original G,P,D
         """
-        limit = self.avg_population + self.slack_value
+        num_districts = self.num_districts
+        avg_population_updated = self.avg_population
+        pop_dict = {i: value for i, value in enumerate(self.populations)}
+        sorted_pop_dct = dict(sorted(pop_dict.items(), key=lambda item: item[1], reverse=True))
+        large_nodes = []
 
-        large_nodes = [i for i, p in enumerate(self.populations) if p > limit]
-
+        for i, p in sorted_pop_dct.items():
+                if p > avg_population_updated * 1.05:
+                        large_nodes.append(i)
+                        num_districts -= 1
+                        avg_population_updated = (avg_population_updated * (num_districts+1) - p)/ (num_districts)
+                else:
+                        break   
+        self.avg_population = avg_population_updated
         G = {
             i: [j for j in self.edges[i] if j not in large_nodes]
             for i in self.edges

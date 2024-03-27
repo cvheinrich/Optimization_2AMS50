@@ -161,6 +161,7 @@ class HeuristicPartitioner(BSP):
         # TODO: who wrote this spaghetti code?
         G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes=False)
         low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
+        self.high_pop_inds = high_pop_inds
 
         P = {i: p for i, p in zip(low_pop_inds, P_list)}
         D = {}

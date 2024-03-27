@@ -2,7 +2,7 @@ import argparse
 from partitioning.swamy.base import BaseSwamyPartitioner as BSP
 from partitioning.swamy.optimal import OptimalPartitioner
 from partitioning.swamy.heuristic import HeuristicPartitioner
-from partitioning.metis import MetisPartitioner
+#from partitioning.metis import MetisPartitioner
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Districting")
