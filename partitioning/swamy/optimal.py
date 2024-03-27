@@ -271,23 +271,30 @@ class OptimalPartitioner(BSP):
         self.slack_value = slack_value
         self._create_model()
 
-    def optimize(self, gap=0.0, slack_step=0.001) -> gp.Model:
+    def optimize(self, gap=0.0) -> gp.Model:
         """
         Optimize model.
 
         @param gap: MIP gap
-        @param slack_step: Step size for increasing slack_value in case of infeasible model
         """
         self.model.Params.MIPGap = gap
         self.model.optimize()
 
-        if self.slack_type == BSP.SLACK_FIXED and slack_step > 0:
-            print("Increasing slack until feasible model is found. Set slack_step=0 to disable.")
-            while self.model.status != GRB.OPTIMAL:
-                self.slack_value += slack_step
+        if self.model.status == GRB.INFEASIBLE and self.slack_type == BSP.SLACK_FIXED:
+            print("Searching for feasible slack value...")
+            lower_bound = 0
+            upper_bound = self.num_districts - 1
+            precision = 0.001
+            while upper_bound - lower_bound > precision:
+                self.slack_value = (lower_bound + upper_bound) / 2
                 print(f"Slack: {self.slack_value}")
                 self.update_model(self.alpha, self.slack_type, self.slack_value)
                 self.model.optimize()
+
+                if self.model.status == GRB.INFEASIBLE:
+                    lower_bound = self.slack_value
+                else:
+                    upper_bound = self.slack_value
 
         if self.model.status == GRB.INFEASIBLE:
             self.model.computeIIS()

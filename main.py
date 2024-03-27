@@ -1,3 +1,4 @@
+import time
 import argparse
 from partitioning.swamy.base import BaseSwamyPartitioner as BSP
 from partitioning.swamy.optimal import OptimalPartitioner
@@ -55,6 +56,8 @@ if __name__ == "__main__":
 
     run_properties = {}
 
+    start_time = time.time()
+
     if p_method == "metis":
         raise NotImplementedError("Metis partitioner not implemented")
         dp = MetisPartitioner(args.state)
@@ -77,9 +80,12 @@ if __name__ == "__main__":
         )
         dp.optimize(**run_properties)
 
+    duration = time.time() - start_time
+
     if args.verbose:
         print(f"Run properties: {run_properties}\n")
         print("Solution:")
         dp.print_solution()
+        print(f"\nDuration: {duration:.2f} seconds")
     if args.map:
         dp.show_map(run_properties)
