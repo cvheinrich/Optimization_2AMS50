@@ -259,3 +259,6 @@ gurobi.lic
 
 # Dataset
 districting_2020/
+
+# Runner
+run.sh

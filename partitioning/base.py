@@ -23,7 +23,7 @@ class DistrictPartitioner:
         @param K: Number of districts
         @param G: Adjacency list of counties
         @param P: Population of each county
-        @param D: Distance between each pair of counties
+        @param D: Distance matrix
         """
 
         self.state = state
@@ -86,9 +86,9 @@ class DistrictPartitioner:
 
         return num_districts, edges, populations, distances
 
-    def show_map(self, run_properties: Dict[str, Any] = {}) -> None:
+    def create_map(self, run_properties: Dict[str, Any] = {}, show: bool = True) -> None:
         """
-        Show map of counties with districts colored
+        Create map of counties with districts colored
         """
 
         shape_file = os.path.join(
@@ -145,8 +145,11 @@ class DistrictPartitioner:
                 facecolor=colors[k],
                 edgecolor="k",
                 label=(
-                    "Pop. {:,.0f},\nDist. {:,.0f}\nCost {:,.2f}".format(
-                        district_pop[k], district_dist[k], self._get_partition_cost(districts[k])
+                    "Pop. {:,.0f} ({:,.3f})\nDist. {:,.0f}\nCost {:,.3f}".format(
+                        district_pop[k],
+                        district_pop[k] / self.avg_population,
+                        district_dist[k],
+                        self._get_partition_cost(districts[k]),
                     )
                 ),
             )
@@ -160,9 +163,22 @@ class DistrictPartitioner:
         )
 
         run_properties_str = ", ".join(f"{k}: {v}" for k, v in run_properties.items())
-        plt.title(run_properties_str + "\n" + self._get_model_properties())
+        plt.title(self.state + "; " + run_properties_str + "\n" + self._get_model_title())
         plt.tight_layout()
-        plt.show()
+
+        plt.xticks([])
+        plt.yticks([])
+
+        file_location = os.path.join(DATA_PATH, "..", "figures", self.state)
+        os.makedirs(file_location, exist_ok=True)
+        file_title = "__".join(
+            [str(v) for v in run_properties.values()]
+            + [str(v) for v in self.get_model_properties().values()]
+        ).replace(".", "_")
+        plt.savefig(os.path.join(file_location, f"{file_title}.png"))
+
+        if show:
+            plt.show()
 
     def optimize(self):
         raise NotImplementedError
@@ -173,5 +189,5 @@ class DistrictPartitioner:
     def _get_district_counties(self) -> Dict[int, List[int]]:
         raise NotImplementedError
 
-    def _get_model_properties(self) -> str:
+    def _get_model_title(self) -> str:
         raise NotImplementedError

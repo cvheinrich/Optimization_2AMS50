@@ -189,6 +189,16 @@ class HeuristicPartitioner(BSP):
     def _get_district_counties(self) -> Dict[int, List[int]]:
         return self.partitions
 
+    def _get_total_dist_cost(self) -> float:
+        return sum(
+            self._get_partition_dist_cost(partition) for partition in self.partitions.values()
+        )
+
+    def _get_total_pop_cost(self) -> float:
+        return sum(
+            self._get_partition_pop_cost(partition) for partition in self.partitions.values()
+        )
+
     def _get_total_cost(self) -> float:
         return sum(self._get_partition_cost(partition) for partition in self.partitions.values())
 

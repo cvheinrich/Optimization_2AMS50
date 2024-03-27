@@ -1,5 +1,8 @@
+import os
 import time
 import argparse
+
+from settings.local_settings import DATA_PATH
 from partitioning.swamy.base import BaseSwamyPartitioner as BSP
 from partitioning.swamy.optimal import OptimalPartitioner
 from partitioning.swamy.heuristic import HeuristicPartitioner
@@ -55,12 +58,13 @@ if __name__ == "__main__":
     p_method = args.method
 
     run_properties = {}
+    model = None
 
     start_time = time.time()
 
     if p_method == "metis":
         raise NotImplementedError("Metis partitioner not implemented")
-        dp = MetisPartitioner(args.state)
+        model = MetisPartitioner(args.state)
     elif p_method in ["swamy_o", "optimal", "swamy_h", "heuristic"]:
         run_properties = {
             "gap": args.gap,
@@ -75,17 +79,27 @@ if __name__ == "__main__":
             )
             run_properties["size_limit"] = 100000
 
-        dp = HeuristicPartitioner.from_files(
+        model = HeuristicPartitioner.from_files(
             args.state, args.alpha, args.slack_type, args.slack_value, 1000
         )
-        dp.optimize(**run_properties)
+        model.optimize(**run_properties)
 
     duration = time.time() - start_time
 
     if args.verbose:
         print(f"Run properties: {run_properties}\n")
         print("Solution:")
-        dp.print_solution()
+        model.print_solution()
         print(f"\nDuration: {duration:.2f} seconds")
-    if args.map:
-        dp.show_map(run_properties)
+
+        file_location = os.path.join(DATA_PATH, "..", "figures", args.state)
+        os.makedirs(file_location, exist_ok=True)
+        file_title = "__".join(
+            [str(v) for v in run_properties.values()]
+            + [str(v) for v in model.get_model_properties().values()]
+        ).replace(".", "_")
+        with open(os.path.join(file_location, f"{file_title}.log"), "w") as f:
+            f.write(f"Arguments: {args}\n")
+            f.write(f"\nDuration: {duration:.2f} seconds\n")
+
+    model.create_map(run_properties, args.map)

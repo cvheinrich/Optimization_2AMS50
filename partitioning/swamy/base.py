@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 from partitioning.base import DistrictPartitioner
 
 
@@ -42,10 +42,14 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         self.slack_value = slack_value
         self.max_iter = max_iter
         # Calculate normalization constant to attempt to make alpha more sensible
-        self.C = self.total_population / (
-            sum(self.distances[i][j] for i in self.edges for j in self.edges[i])
+        # self.C = self.total_population / (
+        #     sum(self.distances[i][j] for i in self.edges for j in self.edges[i])
+        # )
+        distance_factor = sum(self.distances[i][j] for i in self.edges for j in self.edges[i]) / (
+            (self.num_counties) ** 0.5
         )
-        print(f"C = {self.C}")
+        self.C = distance_factor / self.avg_population
+        print(f"Normalization constant: {self.C}")
 
     def from_files(
         state: str,
@@ -230,18 +234,32 @@ class BaseSwamyPartitioner(DistrictPartitioner):
 
         return partitions
 
-    def _get_partition_cost(self, partition: List[int]) -> float:
+    def _get_partition_dist_cost(self, partition: List[int]) -> float:
+        return (1 - self.alpha) * sum(self.distances[i][j] for i in partition for j in partition)
+
+    def _get_partition_pop_cost(self, partition: List[int]) -> float:
         population = sum(self.populations[i] for i in partition)
-        distance = sum(self.distances[i][j] for i in partition for j in partition)
-        return 0.001 * (
-            (1 - self.alpha) * distance
-            + self.C * self.alpha * abs(population - self.avg_population)
-        )
+        return self.C * self.alpha * abs(population - self.avg_population)
+
+    def _get_partition_cost(self, partition: List[int]) -> float:
+        return self._get_partition_pop_cost(partition) + self._get_partition_dist_cost(partition)
 
     def _get_total_cost(self) -> float:
         raise NotImplementedError
 
-    def _get_model_properties(self):
-        return "Alpha: {}, Slack: {} with {:.2f}, \nCost / 1000: {:,.4f}".format(
-            self.alpha, self.slack_type, self.slack_value, self._get_total_cost()
+    def _get_model_title(self) -> str:
+        return "Alpha: {}, Slack: {} with {:.2f}, \n(Dist. + Pop. Cost) / 1000 = {:,.3f} + {:,.3f} = {:,.3f}".format(
+            self.alpha,
+            self.slack_type,
+            self.slack_value,
+            self._get_total_dist_cost(),
+            self._get_total_pop_cost(),
+            self._get_total_cost(),
         )
+
+    def get_model_properties(self) -> Dict[str, Any]:
+        return {
+            "alpha": self.alpha,
+            "slack_type": self.slack_type,
+            "slack_value": self.slack_value,
+        }
