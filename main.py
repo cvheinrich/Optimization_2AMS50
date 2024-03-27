@@ -19,8 +19,9 @@ if __name__ == "__main__":
         default=BSP.ALPHA_DEFAULT,
         help="Alpha value for optimal partitioner",
     )
-    parser.add_argument("--map", type=bool, default=True, help="Show map of districts")
-    parser.add_argument("--verbose", type=bool, default=True, help="Print solution")
+    parser.add_argument("--no_map", action="store_false", help="Show map of districts")
+    parser.add_argument("--silent", action="store_false", help="Print solution")
+    parser.add_argument("--save", action="store_true", help="Save log and map to file")
     parser.add_argument(
         "-t",
         "--slack_type",
@@ -49,8 +50,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-u",
         "--update_avg",
-        type=bool,
-        default=False,
+        action="store_true",
         help="Whether to update average population after applying policy",
     )
 
@@ -86,12 +86,13 @@ if __name__ == "__main__":
 
     duration = time.time() - start_time
 
-    if args.verbose:
+    if not args.silent:
         print(f"Run properties: {run_properties}\n")
         print("Solution:")
         model.print_solution()
         print(f"\nDuration: {duration:.2f} seconds")
 
+    if args.save:
         file_location = os.path.join(DATA_PATH, "..", "figures", args.state)
         os.makedirs(file_location, exist_ok=True)
         file_title = "__".join(
@@ -101,5 +102,6 @@ if __name__ == "__main__":
         with open(os.path.join(file_location, f"{file_title}.log"), "w") as f:
             f.write(f"Arguments: {args}\n")
             f.write(f"\nDuration: {duration:.2f} seconds\n")
+            f.write(f"\n{model.get_model_title()}")
 
-    model.create_map(run_properties, args.map)
+    model.create_map(run_properties, args.no_map, args.save)

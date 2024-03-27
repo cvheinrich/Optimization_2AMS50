@@ -49,7 +49,6 @@ class BaseSwamyPartitioner(DistrictPartitioner):
             (self.num_counties) ** 0.5
         )
         self.C = distance_factor / self.avg_population
-        print(f"Normalization constant: {self.C}")
 
     def from_files(
         state: str,
@@ -247,7 +246,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
     def _get_total_cost(self) -> float:
         raise NotImplementedError
 
-    def _get_model_title(self) -> str:
+    def get_model_title(self) -> str:
         return "Alpha: {}, Slack: {} with {:.2f}, \n(Dist. + Pop. Cost) / 1000 = {:,.3f} + {:,.3f} = {:,.3f}".format(
             self.alpha,
             self.slack_type,
