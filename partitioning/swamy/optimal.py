@@ -239,11 +239,11 @@ class OptimalPartitioner(BSP):
         self.model.update()
 
         for i in range(self.num_counties):
-            if self.x[i, i].start == 1:
+            if self.x[i, i].start > 0.5:
                 self._set_initial_flow(i, i, [False] * self.num_counties)
                 for j in range(self.num_counties):
                     for k in range(j + 1, self.num_counties):
-                        if self.x[i, j].start == 1 and self.x[i, k].start == 1:
+                        if self.x[i, j].start > 0.5 and self.x[i, k].start > 0.5:
                             self.y[i, j, k].start = 1
 
         part_ind = 0
@@ -281,13 +281,12 @@ class OptimalPartitioner(BSP):
         self.model.optimize()
 
         if self.model.status == GRB.INFEASIBLE and self.slack_type == BSP.SLACK_FIXED:
-            print("Searching for feasible slack value...")
+            # Searching for feasible slack value...
             lower_bound = 0
             upper_bound = self.num_districts - 1
             precision = 0.001
             while upper_bound - lower_bound > precision:
                 self.slack_value = (lower_bound + upper_bound) / 2
-                print(f"Slack: {self.slack_value}")
                 self.update_model(self.alpha, self.slack_type, self.slack_value)
                 self.model.optimize()
 
@@ -325,9 +324,9 @@ class OptimalPartitioner(BSP):
 
     def _get_district_counties(self) -> Dict[int, List[int]]:
         return {
-            i: [j for j in range(self.num_counties) if self.x[i, j].X == 1]
+            i: [j for j in range(self.num_counties) if self.x[i, j].X > 0.5]
             for i in range(self.num_counties)
-            if self.x[i, i].X == 1
+            if self.x[i, i].X > 0.5
         }
 
     def _get_total_cost(self) -> float:
