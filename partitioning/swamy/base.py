@@ -12,6 +12,12 @@ class BaseSwamyPartitioner(DistrictPartitioner):
     SLACK_VALUE_DEFAULT = 0.05
     MAX_ITER_DEFAULT = 500
 
+    POLICY_REMOVE = "remove"
+    POLICY_RECURSIVE = "recursive"
+    POLICY_KEEP = "keep"
+    POLICIES = [POLICY_REMOVE, POLICY_RECURSIVE, POLICY_KEEP]
+    POLICY_DEFAULT = POLICY_KEEP
+
     def __init__(
         self,
         state: str,
@@ -61,19 +67,34 @@ class BaseSwamyPartitioner(DistrictPartitioner):
         )
 
     def prepare_graph(
-        self, remove_large_nodes: bool = True
+        self, large_node_policy: str = POLICY_DEFAULT
     ) -> Tuple[Dict[int, List[int]], List[int], List[List[int]], List[int]]:
         """
         @param remove_large_nodes: If True, remove large nodes from the graph
         @return: Tuple of (G', P', D', large_nodes), where G',P',D' are created by removing large nodes,
                  if `remove_large_nodes` is True, otherwise return the original G,P,D
         """
-        limit = self.avg_population * (1 + self.slack_value)
+        large_nodes = []
 
-        if remove_large_nodes:
+        if large_node_policy == self.POLICY_REMOVE:
+            limit = self.avg_population * (1 + self.slack_value)
             large_nodes = [i for i, p in enumerate(self.populations) if p > limit]
-        else:
+        elif large_node_policy == self.POLICY_RECURSIVE:
+            num_districts_updated = self.num_districts
+            avg_population_updated = self.avg_population
+            pop_dict = {i: value for i, value in enumerate(self.populations)}
+            sorted_pop_dct = dict(sorted(pop_dict.items(), key=lambda item: item[1], reverse=True))
             large_nodes = []
+
+            for i, p in sorted_pop_dct.items():
+                if p > avg_population_updated * (1 + self.slack_value):
+                    large_nodes.append(i)
+                    num_districts_updated -= 1
+                    avg_population_updated = (
+                        avg_population_updated * (num_districts_updated + 1) - p
+                    ) / (num_districts_updated)
+                else:
+                    break
 
         G = {
             i: [j for j in self.edges[i] if j not in large_nodes]
@@ -220,7 +241,7 @@ class BaseSwamyPartitioner(DistrictPartitioner):
     def _get_total_cost(self) -> float:
         raise NotImplementedError
 
-    def _get_run_summary(self):
+    def _get_model_properties(self):
         return "Alpha: {}, Slack: {} {},\nCost: {}".format(
             self.alpha, self.slack_type, self.slack_value, self._get_total_cost()
         )

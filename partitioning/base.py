@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 from matplotlib.patches import Patch
 import geopandas as gpd
@@ -86,7 +86,7 @@ class DistrictPartitioner:
 
         return num_districts, edges, populations, distances
 
-    def show_map(self) -> None:
+    def show_map(self, run_properties: Dict[str, Any] = {}) -> None:
         """
         Show map of counties with districts colored
         """
@@ -159,7 +159,8 @@ class DistrictPartitioner:
             bbox_to_anchor=(1, 1),
         )
 
-        plt.title(self._get_run_summary())
+        run_properties_str = ", ".join(f"{k}: {v}" for k, v in run_properties.items())
+        plt.title(run_properties_str + "\n" + self._get_model_properties())
         plt.tight_layout()
         plt.show()
 
@@ -172,5 +173,5 @@ class DistrictPartitioner:
     def _get_district_counties(self) -> Dict[int, List[int]]:
         raise NotImplementedError
 
-    def _get_run_summary(self) -> str:
+    def _get_model_properties(self) -> str:
         raise NotImplementedError

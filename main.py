@@ -22,37 +22,64 @@ if __name__ == "__main__":
         "--slack_type",
         type=str,
         default=BSP.SLACK_DEFAULT,
-        help="Starting slack value for fixed and dynamic solution types",
+        help=f"Slack type. One of {', '.join(BSP.SLACK_TYPES)}",
     )
     parser.add_argument(
         "-v",
         "--slack_value",
         type=float,
         default=BSP.SLACK_VALUE_DEFAULT,
-        help="Starting slack value for fixed and dynamic solution types",
+        help=f'Slack value. Used for fixed slack type, and when policy is not "{BSP.POLICY_KEEP}"',
     )
     parser.add_argument("-g", "--gap", type=float, default=0.0, help="Gap for optimal partitioner")
     parser.add_argument(
         "-l", "--size_limit", type=int, default=15, help="Size limit for heuristic partitioner"
     )
+    parser.add_argument(
+        "-p",
+        "--policy",
+        type=str,
+        default=BSP.POLICY_DEFAULT,
+        help=f"Policy for large nodes. One of {', '.join(BSP.POLICIES)}",
+    )
+    parser.add_argument(
+        "-u",
+        "--update_avg",
+        type=bool,
+        default=False,
+        help="Whether to update average population after applying policy",
+    )
 
     args = parser.parse_args()
     p_method = args.method
 
+    run_properties = {}
+
     if p_method == "metis":
+        raise NotImplementedError("Metis partitioner not implemented")
         dp = MetisPartitioner(args.state)
-    elif p_method in ["swamy_o", "optimal"]:
-        dp = OptimalPartitioner.from_files(
-            args.state, args.alpha, slack_type=args.slack_type, slack_value=args.slack_value
-        )
-        dp.optimize(gap=args.gap)
-    elif p_method in ["swamy_h", "heuristic"]:
+    elif p_method in ["swamy_o", "optimal", "swamy_h", "heuristic"]:
+        run_properties = {
+            "gap": args.gap,
+            "size_limit": args.size_limit,
+            "policy": args.policy,
+            "update_avg": args.update_avg,
+        }
+
+        if p_method in ["swamy_o", "optimal"]:
+            Warning(
+                "Some options do not work for optimal partitioner. Using heuristic partitioner with large size limit instead."
+            )
+            run_properties["size_limit"] = 100000
+
         dp = HeuristicPartitioner.from_files(
             args.state, args.alpha, args.slack_type, args.slack_value, 1000
         )
-        dp.optimize(gap=args.gap, size_limit=args.size_limit)
+        dp.optimize(**run_properties)
 
     if args.verbose:
+        print(f"Run properties: {run_properties}\n")
+        print("Solution:")
         dp.print_solution()
     if args.map:
-        dp.show_map()
+        dp.show_map(run_properties)

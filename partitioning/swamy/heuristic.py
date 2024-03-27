@@ -154,13 +154,17 @@ class HeuristicPartitioner(BSP):
         else:
             return self._solve_exact(G, P, D, gap)
 
-    def optimize(self, gap: float = 0.0, size_limit=15):
+    def optimize(
+        self,
+        gap: float = 0.0,
+        size_limit: int = 15,
+        policy: str = BSP.POLICY_DEFAULT,
+        update_avg: bool = False,
+    ):
         """
         Optimize partitioning using Swamy et al. (2022)
         """
-        # TODO: who wrote this spaghetti code?
-        remove_large_nodes = self.slack_type == BSP.SLACK_FIXED
-        G, P_list, D_mat, high_pop_inds = self.prepare_graph(remove_large_nodes)
+        G, P_list, D_mat, high_pop_inds = self.prepare_graph(policy)
         low_pop_inds = [i for i in range(self.num_counties) if i not in high_pop_inds]
 
         P = {i: p for i, p in zip(low_pop_inds, P_list)}
@@ -170,10 +174,14 @@ class HeuristicPartitioner(BSP):
                 D[node_i, node_j] = D[node_j, node_i] = D_mat[i][j]
 
         self.num_districts -= len(high_pop_inds)
+        if update_avg:
+            self.avg_population = sum(P.values()) / self.num_districts
         actual_size_limit = min(self.num_counties, max(size_limit, self.num_districts))
         self.partitions = self._optimize(G, P, D, actual_size_limit, gap)
 
         self.num_districts += len(high_pop_inds)
+        if update_avg:
+            self.avg_population = self.total_population / self.num_districts
         self.partitions.update({i: [i] for i in high_pop_inds})
 
         return self.partitions
