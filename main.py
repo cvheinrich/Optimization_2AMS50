@@ -99,7 +99,7 @@ if __name__ == "__main__":
             [str(v) for v in run_properties.values()]
             + [str(v) for v in model.get_model_properties().values()]
         ).replace(".", "_")
-        with open(os.path.join(file_location, f"{file_title}.log"), "w") as f:
+        with open(os.path.join(file_location, f"{file_title}.txt"), "w") as f:
             f.write(f"Arguments: {args}\n")
             f.write(f"\nDuration: {duration:.2f} seconds\n")
             f.write(f"\n{model.get_model_title()}")
